@@ -1,0 +1,132 @@
+/**
+ * THLED CRM — Zalo personal worker (chạy riêng trên VPS/máy local, KHÔNG deploy lên Vercel)
+ *
+ *  node worker/zalo.mjs
+ *
+ * Dùng thư viện không chính thức `zca-js` (giả lập Zalo Web). RỦI RO: Zalo có thể khoá tài khoản
+ * nếu gửi quá nhiều/quá nhanh. Giữ friend_daily_limit thấp (≤15/ngày), delay ngẫu nhiên, chỉ chạy 1 tài khoản.
+ *
+ * Việc của worker:
+ *  1. Đăng nhập bằng QR (ghi QR vào crm_zalo_worker.qr_image → hiện trên màn Cài đặt kênh)
+ *  2. Lắng nghe tin nhắn đến → ingest qua /api/internal/ingest (dùng CRON_SECRET)
+ *  3. Gửi crm_outbox cho kênh zalo_personal
+ *  4. Gửi lời mời kết bạn từ crm_zalo_friend_tasks + tin nhắn sau khi kết bạn
+ */
+import { createClient } from "@supabase/supabase-js";
+import { Zalo, ThreadType, LoginQRCallbackEventType } from "zca-js";
+import { config } from "dotenv";
+config({ path: ".env.local" }); config();
+
+const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+const APP_URL = process.env.APP_URL || "http://localhost:3000";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a));
+
+async function setWorker(patch) { await sb.from("crm_zalo_worker").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1); }
+
+async function ingest(payload) {
+  const r = await fetch(`${APP_URL}/api/internal/ingest`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${process.env.CRON_SECRET}` }, body: JSON.stringify(payload) });
+  if (!r.ok) console.error("ingest fail", await r.text());
+}
+
+async function main() {
+  const zalo = new Zalo();
+  let api;
+  const { data: w } = await sb.from("crm_zalo_worker").select("*").eq("id", 1).single();
+  try {
+    if (w?.session?.cookie && w.state !== "need_qr") {
+      api = await zalo.login({ cookie: w.session.cookie, imei: w.session.imei, userAgent: w.session.userAgent });
+    } else throw new Error("no session");
+  } catch {
+    console.log("Đăng nhập QR…");
+    let session = null;
+    api = await zalo.loginQR({}, async (ev) => {
+      if (ev.type === LoginQRCallbackEventType.QRCodeGenerated) await setWorker({ state: "qr_ready", qr_image: ev.data.image.startsWith("data:") ? ev.data.image : `data:image/png;base64,${ev.data.image}` });
+      if (ev.type === LoginQRCallbackEventType.QRCodeExpired) ev.actions.retry();
+      if (ev.type === LoginQRCallbackEventType.GotLoginInfo) session = ev.data; // {cookie, imei, userAgent}
+    });
+    if (session) await setWorker({ session });
+  }
+  const own = api.getOwnId();
+  const me = await api.fetchAccountInfo().catch(() => null);
+  const name = me?.profile?.displayName || "Zalo cá nhân";
+  await setWorker({ state: "online", own_uid: own, account_name: name, qr_image: null, heartbeat_at: new Date().toISOString() });
+  // đảm bảo kênh tồn tại
+  await sb.from("crm_channels").upsert({ type: "zalo_personal", external_id: String(own), name, status: "connected" }, { onConflict: "type,external_id" });
+  console.log("Online:", name, own);
+
+  // 2. listener
+  api.listener.on("message", async (m) => {
+    try {
+      if (m.type !== ThreadType.User) return; // bỏ qua group
+      const d = m.data; const isSelf = m.isSelf;
+      const uid = isSelf ? d.toUid || m.threadId : d.uidFrom || m.threadId;
+      let text = typeof d.content === "string" ? d.content : d.content?.title || d.content?.description || "";
+      let type = "text"; const attachments = [];
+      if (d.msgType === "chat.photo" || d.content?.href?.match(/\.(jpg|png|jpeg|webp)/)) { type = "image"; attachments.push({ type: "image", url: d.content?.href || d.content?.thumb }); text = d.content?.title || ""; }
+      else if (d.msgType === "chat.sticker") { type = "sticker"; text = "[Sticker]"; }
+      else if (d.msgType === "chat.voice") { type = "audio"; attachments.push({ type: "audio", url: d.content?.href }); }
+      else if (d.msgType === "share.file") { type = "file"; attachments.push({ type: "file", url: d.content?.href, name: d.content?.title }); }
+      let senderName = d.dName, avatar, phone;
+      if (!isSelf) { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.displayName || p.zaloName || senderName; avatar = p.avatar; phone = p.phoneNumber; } }
+      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in" });
+    } catch (e) { console.error("msg err", e.message); }
+  });
+  api.listener.start();
+
+  // 3+4. vòng lặp outbox & friend tasks
+  while (true) {
+    try {
+      await setWorker({ heartbeat_at: new Date().toISOString() });
+      const { data: w2 } = await sb.from("crm_zalo_worker").select("state,auto_friend,friend_daily_limit").eq("id", 1).single();
+      if (w2?.state === "need_qr") { console.log("Yêu cầu đăng nhập lại"); process.exit(0); }
+
+      const { data: out } = await sb.from("crm_outbox").select("*, crm_channels(type)").eq("status", "queued").or(`scheduled_at.is.null,scheduled_at.lte.${new Date().toISOString()}`).limit(5);
+      for (const o of out || []) {
+        if (o.crm_channels?.type !== "zalo_personal") continue;
+        try {
+          if (o.attachments?.[0]?.url && o.attachments[0].type === "image") await api.sendMessage({ msg: o.text || "", attachments: [o.attachments[0].url] }, o.external_id, ThreadType.User);
+          else await api.sendMessage(o.text, o.external_id, ThreadType.User);
+          await sb.from("crm_outbox").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", o.id);
+          await sb.from("crm_messages").update({ status: "sent" }).eq("conversation_id", o.conversation_id).eq("status", "queued").eq("text", o.text);
+          if (o.source !== "manual") await sb.from("crm_messages").insert({ conversation_id: o.conversation_id, direction: "out", type: "text", text: o.text, attachments: o.attachments, status: "sent" });
+          await sleep(rnd(2000, 5000));
+        } catch (e) { await sb.from("crm_outbox").update({ status: "failed", error: e.message }).eq("id", o.id); }
+      }
+
+      // kết bạn — giới hạn/ngày
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const { count } = await sb.from("crm_zalo_friend_tasks").select("id", { count: "exact", head: true }).in("status", ["sent", "accepted"]).gte("done_at", today.toISOString());
+      if ((count || 0) < (w2?.friend_daily_limit || 15)) {
+        const { data: tasks } = await sb.from("crm_zalo_friend_tasks").select("*").eq("status", "todo").or(`scheduled_at.is.null,scheduled_at.lte.${new Date().toISOString()}`).order("created_at").limit(1);
+        for (const t of tasks || []) {
+          try {
+            const found = await api.findUser(t.phone);
+            if (!found?.uid) { await sb.from("crm_zalo_friend_tasks").update({ status: "not_found", last_error: "Không tìm thấy Zalo", attempts: t.attempts + 1 }).eq("id", t.id); continue; }
+            await sb.from("crm_zalo_friend_tasks").update({ zalo_uid: found.uid, zalo_name: found.display_name || found.zalo_name }).eq("id", t.id);
+            if (found.isFr === 1) {
+              await sb.from("crm_zalo_friend_tasks").update({ status: "accepted", done_at: new Date().toISOString() }).eq("id", t.id);
+            } else {
+              await api.sendFriendRequest(t.greeting || "Xin chào, em bên THLED ạ.", found.uid);
+              await sb.from("crm_zalo_friend_tasks").update({ status: "sent", done_at: new Date().toISOString(), attempts: t.attempts + 1 }).eq("id", t.id);
+            }
+            // liên kết identity ↔ customer để hội thoại sau này gắn đúng khách
+            if (t.customer_id) { const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").eq("external_id", String(own)).single(); if (ch) await sb.from("crm_identities").upsert({ channel_id: ch.id, channel: "zalo_personal", external_id: String(found.uid), display_name: found.display_name, avatar_url: found.avatar, phone: t.phone, customer_id: t.customer_id }, { onConflict: "channel_id,external_id" }); }
+            await sleep(rnd(20000, 60000));
+          } catch (e) { await sb.from("crm_zalo_friend_tasks").update({ status: t.attempts >= 2 ? "failed" : "todo", last_error: e.message, attempts: t.attempts + 1 }).eq("id", t.id); }
+        }
+      }
+      // kiểm tra kết bạn đã được chấp nhận → gửi tin sau khi kết bạn
+      const { data: sent } = await sb.from("crm_zalo_friend_tasks").select("*").eq("status", "sent").not("zalo_uid", "is", null).limit(10);
+      for (const t of sent || []) {
+        const info = await api.getUserInfo(t.zalo_uid).catch(() => null); const p = info?.changed_profiles?.[t.zalo_uid];
+        if (p?.isFr === 1) {
+          await sb.from("crm_zalo_friend_tasks").update({ status: "accepted" }).eq("id", t.id);
+          if (t.after_accept_message) { await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User); await sleep(rnd(2000, 4000)); }
+        }
+      }
+    } catch (e) { console.error("loop err", e.message); await setWorker({ last_error: e.message }); }
+    await sleep(15000);
+  }
+}
+main().catch(async (e) => { console.error(e); await setWorker({ state: "offline", last_error: e.message }); process.exit(1); });

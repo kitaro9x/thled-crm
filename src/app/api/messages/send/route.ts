@@ -1,0 +1,42 @@
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { fbSendMessage } from "@/lib/crm/facebook";
+
+/**
+ * Gửi tin từ inbox. fb_page → Graph API ngay; zalo_personal → crm_outbox để worker gửi.
+ * body: { conversation_id, text?, attachments?, scheduled_at? }
+ */
+export async function POST(req: NextRequest) {
+  const sb = await supabaseServer();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const { conversation_id, text, attachments = [], scheduled_at } = await req.json();
+  const db = supabaseAdmin();
+
+  const { data: conv } = await db.from("crm_v_conversations").select("*").eq("id", conversation_id).single();
+  if (!conv) return NextResponse.json({ error: "conversation not found" }, { status: 404 });
+  const { data: channel } = await db.from("crm_channels").select("*").eq("id", conv.channel_id).single();
+
+  if (scheduled_at) {
+    await db.from("crm_conversations").update({ scheduled_message: { text, send_at: scheduled_at } }).eq("id", conversation_id);
+    await db.from("crm_outbox").insert({ conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, attachments, scheduled_at, sent_by: user.id, source: "manual" });
+    return NextResponse.json({ ok: true, scheduled: true });
+  }
+
+  if (channel?.type === "fb_page") {
+    try {
+      const token = channel.credentials?.page_access_token;
+      const res = await fbSendMessage(token, conv.external_id, text, attachments[0]?.url);
+      await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text, attachments, external_msg_id: res.message_id, sender_member_id: user.id, status: "sent" });
+      return NextResponse.json({ ok: true });
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
+  }
+
+  // Zalo cá nhân / kênh khác: xếp hàng, worker gửi và ghi crm_messages
+  await db.from("crm_outbox").insert({ conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, attachments, sent_by: user.id, source: "manual" });
+  await db.from("crm_messages").insert({ conversation_id, direction: "out", type: "text", text, attachments, sender_member_id: user.id, status: "queued" });
+  return NextResponse.json({ ok: true, queued: true });
+}
