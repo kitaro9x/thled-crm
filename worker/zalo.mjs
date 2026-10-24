@@ -24,6 +24,12 @@ const rnd = (a, b) => a + Math.floor(Math.random() * (b - a));
 
 async function setWorker(patch) { await sb.from("crm_zalo_worker").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1); }
 
+// Gói Vercel Hobby chỉ cho cron 1 lần/ngày → worker gọi job mỗi phút thay thế
+async function runCronJobs() {
+  try { await fetch(`${APP_URL}/api/cron/jobs`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } }); } catch (e) { console.error("cron err", e.message); }
+}
+setInterval(runCronJobs, 60000);
+
 async function ingest(payload) {
   const r = await fetch(`${APP_URL}/api/internal/ingest`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${process.env.CRON_SECRET}` }, body: JSON.stringify(payload) });
   if (!r.ok) console.error("ingest fail", await r.text());

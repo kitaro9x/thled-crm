@@ -39,7 +39,7 @@ npm i
 npm run build        # kiểm tra
 vercel               # hoặc import repo trên vercel.com
 ```
-`vercel.json` đã có cron `/api/cron/jobs` mỗi phút (gửi tin hẹn giờ, kịch bản nuôi, trigger theo lịch, online/offline).
+`vercel.json` có cron `/api/cron/jobs` 1 lần/ngày (giới hạn gói Hobby). Worker Zalo gọi endpoint này **mỗi phút** (gửi tin hẹn giờ, kịch bản nuôi, trigger theo lịch, online/offline) — nên worker cần chạy 24/7. Nếu lên gói Pro, đổi schedule thành `* * * * *`.
 
 ## 5. Kết nối Facebook Fanpage (API chính thức)
 
