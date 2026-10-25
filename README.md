@@ -4,6 +4,8 @@ CRM bán hàng dựa trên tin nhắn: gom inbox Fanpage + Zalo cá nhân, tự 
 
 Stack: Next.js 15 (App Router) · Supabase (Postgres + Auth + Realtime, project `lighting-website`) · Vercel · worker Zalo (Node, chạy riêng).
 
+> **Trạng thái triển khai & sổ tay vận hành (VPS, Zalo, lỗi đã gặp): xem `docs/OPERATIONS.md`.**
+
 ## 1. Database
 
 Chạy file `supabase/migrations/20261023_crm_core.sql` trong Supabase SQL Editor (hoặc `supabase db push`). File này **mở rộng** các bảng `crm_*` đã có, không xoá dữ liệu. Có seed sẵn: phễu Default + 7 giai đoạn, 11 nhãn Zalo, 10 cảm xúc, lý do thất bại, mẫu báo giá, thông tin công ty.
@@ -45,14 +47,17 @@ vercel               # hoặc import repo trên vercel.com
 
 1. Meta for Developers → tạo app (Business) → thêm sản phẩm **Messenger** và **Webhooks**.
 2. Webhooks → Page → Callback URL `https://<domain>/api/webhooks/facebook`, Verify token = `FB_VERIFY_TOKEN`; subscribe `messages, messaging_postbacks, message_deliveries, message_reads, feed`.
-3. App Settings → Basic → thêm domain app vào *App Domains*; Facebook Login → Valid OAuth Redirect = domain app.
-4. Trong CRM: Cài đặt → Kết nối kênh → **Kết nối** Facebook → chọn page. App lưu page token + tự subscribe.
+3. App Settings → Basic → thêm domain app vào *App Domains*. Thêm sản phẩm **Đăng nhập Facebook** → Cài đặt → *URI chuyển hướng OAuth hợp lệ* = `https://<domain>/api/channels/facebook/callback`.
+4. Trong CRM: Cài đặt → Kết nối kênh → **Kết nối** Facebook (OAuth redirect) → chọn page. App lưu page token + tự subscribe. Dự phòng: nút *Dùng token* dán User Access Token từ Graph API Explorer.
 5. Để gửi tin cho khách sau 24h, app dùng message tag `POST_PURCHASE_UPDATE` (chỉ dùng cho cập nhật đơn/giao hàng theo chính sách Meta). Chạy production cần App Review quyền `pages_messaging`.
 
 ## 6. Kết nối Zalo cá nhân (worker, KHÔNG chính thức)
 
+VPS Ubuntu mới (cần Node 22): `curl -fsSL https://raw.githubusercontent.com/kitaro9x/thled-crm/main/scripts/install-vps.sh | bash` — script cài Node/pm2, clone repo, hỏi 4 biến env, chạy `pm2 start worker/zalo.mjs --name zalo`.
+
+Chạy tay:
 ```bash
-APP_URL=https://crm.thled.vn npm run worker:zalo
+APP_URL=https://thled-crm.vercel.app npm run worker:zalo
 ```
 - Chạy trên VPS/máy tính bật 24/7 (pm2: `pm2 start worker/zalo.mjs --name zalo`).
 - Lần đầu: trong CRM bấm **Lấy mã QR đăng nhập** → quét bằng app Zalo của số sale. Session lưu trong `crm_zalo_worker`.
