@@ -28,7 +28,7 @@ export default function Privacy() {
       <p>Mọi thay đổi sẽ được cập nhật tại trang này kèm ngày hiệu lực mới.</p>
       <hr className="my-8" />
       <h2 className="text-xl font-bold mb-2">Privacy Policy (English summary)</h2>
-      <p>THLED CRM is an internal customer-service tool operated by THLED Trading & Services Co., Ltd (Vietnam). We collect messages, comments and contact details that customers send to THLED's Facebook Page, Zalo accounts or website, solely to reply, quote, fulfil orders and provide warranty support. Data is stored on Supabase/Vercel, encrypted in transit, accessible only to authorised THLED staff, and never sold or shared for advertising. You may request access, correction or deletion at any time via <a className="text-blue-600 underline" href="/data-deletion">/data-deletion</a>, hotline +84 966 931 056 or lecuong110296@gmail.com; requests are handled within 7 business days.</p>
+      <p>THLED CRM is an internal customer-service tool operated by THLED Trading & Services Co., Ltd (Vietnam). We collect messages, comments and contact details that customers send to the THLED Facebook Page, Zalo accounts or website, solely to reply, quote, fulfil orders and provide warranty support. Data is stored on Supabase/Vercel, encrypted in transit, accessible only to authorised THLED staff, and never sold or shared for advertising. You may request access, correction or deletion at any time via <a className="text-blue-600 underline" href="/data-deletion">/data-deletion</a>, hotline +84 966 931 056 or lecuong110296@gmail.com; requests are handled within 7 business days.</p>
     </main>
   );
 }
