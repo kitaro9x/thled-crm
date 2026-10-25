@@ -31,14 +31,14 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   if (!channel) throw new Error(`Kênh chưa kết nối: ${m.channelType}/${m.channelExternalId}`);
 
   // 1. identity
-  const { data: identity } = await db
+  const { data: identity, error: idErr } = await db
     .from("crm_identities")
     .upsert(
       { channel_id: channel.id, channel: m.channelType, external_id: m.senderExternalId, display_name: m.senderName ?? undefined, avatar_url: m.senderAvatar ?? undefined, phone: normalizePhone(m.senderPhone) ?? undefined },
       { onConflict: "channel_id,external_id", ignoreDuplicates: false }
     )
     .select("id,customer_id,display_name,avatar_url,phone").single();
-  if (!identity) throw new Error("identity upsert failed");
+  if (!identity) throw new Error("identity upsert failed: " + (idErr?.message || "unknown"));
 
   // 2. conversation (1 identity = 1 inbox conversation; comment = theo post)
   const kind = m.kind || "inbox";
