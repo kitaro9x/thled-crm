@@ -12,7 +12,7 @@ npm i -g pm2 >/dev/null 2>&1 || true
 echo "== 2/5 Tải mã nguồn =="
 cd /opt
 if [ -d thled-crm ]; then cd thled-crm && git pull -q; else git clone -q https://github.com/kitaro9x/thled-crm.git && cd thled-crm; fi
-npm i --omit=dev --no-audit --no-fund >/dev/null 2>&1 || npm i --no-audit --no-fund >/dev/null
+npm i --no-audit --no-fund >/dev/null
 
 echo "== 3/5 Cấu hình =="
 if [ ! -f .env.local ]; then
