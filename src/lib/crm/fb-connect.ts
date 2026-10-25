@@ -30,7 +30,8 @@ export async function connectPagesFromUserToken(userToken: string, pageIds?: str
     if (pageIds?.length && !pageIds.includes(p.id)) continue;
     const sub = await fbSubscribePage(p.id, p.access_token).catch((e) => ({ error: { message: e.message } }));
     const subscribed = !!sub?.success;
-    const { data } = await db.from("crm_channels").upsert({ type: "fb_page", external_id: p.id, name: p.name, avatar_url: p.picture?.data?.url, status: "connected", last_error: subscribed ? null : (sub?.error?.message || "Chưa subscribe webhook"), credentials: { page_access_token: p.access_token } }, { onConflict: "type,external_id" }).select("id,name").single();
+    const { data, error } = await db.from("crm_channels").upsert({ type: "fb_page", external_id: p.id, name: p.name, avatar_url: p.picture?.data?.url, status: "connected", last_error: subscribed ? null : (sub?.error?.message || "Chưa subscribe webhook"), credentials: { page_access_token: p.access_token } }, { onConflict: "type,external_id" }).select("id,name").single();
+    if (error) throw new Error(`Không lưu được kênh "${p.name}": ${error.message}` + (/row-level|permission|JWT|apikey/i.test(error.message) ? " — kiểm tra SUPABASE_SERVICE_ROLE_KEY trên Vercel" : ""));
     out.push({ id: data?.id || p.id, name: p.name, subscribed, error: subscribed ? undefined : sub?.error?.message });
   }
   return out;
