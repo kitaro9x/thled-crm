@@ -11,7 +11,7 @@ export async function middleware(req: NextRequest) {
   });
   const { data: { user } } = await sb.auth.getUser();
   const p = req.nextUrl.pathname;
-  const isPublic = p.startsWith("/login") || p.startsWith("/api/webhooks") || p.startsWith("/api/cron") || p.startsWith("/api/internal") || p.startsWith("/_next") || p === "/favicon.ico";
+  const isPublic = p.startsWith("/login") || p === "/privacy" || p === "/data-deletion" || p.startsWith("/api/webhooks") || p.startsWith("/api/cron") || p.startsWith("/api/internal") || p.startsWith("/_next") || p === "/favicon.ico";
   if (!user && !isPublic) return NextResponse.redirect(new URL("/login", req.url));
   if (user && p === "/login") return NextResponse.redirect(new URL("/inbox", req.url));
   return res;
