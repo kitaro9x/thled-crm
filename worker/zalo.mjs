@@ -65,7 +65,7 @@ async function recordOutgoing(own, uid, name, text) {
 }
 
 async function main() {
-  const zalo = new Zalo();
+  const zalo = new Zalo({ selfListen: true, checkUpdate: false }); // selfListen: nhận cả tin mình gửi từ điện thoại để đồng bộ về CRM
   let api;
   const { data: w } = await sb.from("crm_zalo_worker").select("*").eq("id", 1).single();
   try {
