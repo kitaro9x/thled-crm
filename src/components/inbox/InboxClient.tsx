@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Search, Filter } from "lucide-react";
+import { Search, Filter, Users } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -22,6 +22,9 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [qf, setQf] = useState<QuickFilter>("open");
   const [showFilter, setShowFilter] = useState(false);
   const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string }>({});
+  const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
+  useEffect(() => { try { const v = localStorage.getItem("inbox_group"); if (v !== null) setGroup(v === "1"); } catch {} }, []);
+  const toggleGroup = () => { setGroup((g) => { try { localStorage.setItem("inbox_group", g ? "0" : "1"); } catch {} return !g; }); };
 
   // realtime: cập nhật danh sách khi có tin mới
   useEffect(() => {
@@ -52,7 +55,18 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     return true;
   }), [convs, q, qf, f]);
 
-  const current = convs.find((c) => c.id === sel) || null;
+  // gộp: 1 khách (customer_id) = 1 dòng; hội thoại chưa có khách đứng riêng
+  const groups = useMemo(() => {
+    if (!group) return list.map((c) => ({ key: c.id, convs: [c], primary: c, unread: c.unread_count }));
+    const m = new Map<string, Conversation[]>();
+    for (const c of list) { const k = c.customer_id || c.id; m.set(k, [...(m.get(k) || []), c]); }
+    return Array.from(m.entries()).map(([key, cs]) => { const sorted = [...cs].sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || "")); return { key, convs: sorted, primary: sorted[0], unread: cs.reduce((n, c) => n + (c.unread_count || 0), 0) }; })
+      .sort((a, b) => (b.primary.last_message_at || "").localeCompare(a.primary.last_message_at || ""));
+  }, [list, group]);
+  const curGroup = groups.find((g) => g.key === sel) || groups.find((g) => g.convs.some((c) => c.id === sel)) || null;
+  const current = curGroup?.primary || convs.find((c) => c.id === sel) || null;
+  // mọi hội thoại của khách này (kể cả ngoài bộ lọc) để thread hiển thị đủ kênh
+  const siblings = useMemo(() => current ? (group && current.customer_id ? convs.filter((c) => c.customer_id === current.customer_id) : [current]) : [], [convs, current, group]);
 
   return (
     <div className="h-full flex">
@@ -61,6 +75,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         <div className="p-2 border-b border-slate-100 space-y-2">
           <div className="flex items-center gap-2">
             <div className="relative flex-1"><Search size={14} className="absolute left-2 top-2.5 text-slate-400" /><input className="input pl-7" placeholder="Tìm tên, SĐT, nội dung" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            <button className={cn("btn px-2", group && "bg-blue-50 border-blue-300")} title={group ? "Đang gộp FB + Zalo theo khách (bấm để tách)" : "Gộp hội thoại theo khách"} onClick={toggleGroup}><Users size={14} /></button>
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
           <div className="flex gap-1 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("chip border", qf === x.k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200")}>{x.l}</button>)}</div>
@@ -75,21 +90,20 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         </div>
         <div className="flex-1 overflow-y-auto">
           {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
-          {list.map((c) => (
-            <button key={c.id} onClick={() => setSel(c.id)} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === c.id && "bg-blue-50")}>
-              <div className="relative"><Avatar src={c.identity_avatar} name={c.display_name} size={40} /><span className="absolute -bottom-0.5 -right-0.5"><ChannelIcon type={c.channel_type} size={14} /></span></div>
+          {groups.map((g) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
+            <button key={g.key} onClick={() => setSel(g.key)} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50")}>
+              <div className="relative"><Avatar src={c.identity_avatar} name={c.display_name} size={40} /><span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2"><div className={cn("truncate", c.unread_count ? "font-semibold" : "font-medium")}>{c.person_name || c.display_name || c.external_id}</div><div className="text-[11px] text-slate-400 shrink-0">{ago(c.last_message_at)}</div></div>
-                <div className="flex items-center justify-between gap-2"><div className="truncate text-xs text-slate-500">{c.last_message_text}</div>{c.unread_count > 0 && <span className="bg-red-500 text-white rounded-full text-[10px] px-1.5 min-w-[18px] text-center">{c.unread_count}</span>}</div>
+                <div className="flex items-center justify-between gap-2"><div className={cn("truncate", g.unread ? "font-semibold" : "font-medium")}>{c.person_name || c.display_name || c.external_id}{g.convs.length > 1 && <span className="ml-1 text-[10px] text-slate-400">{g.convs.length} kênh</span>}</div><div className="text-[11px] text-slate-400 shrink-0">{ago(c.last_message_at)}</div></div>
+                <div className="flex items-center justify-between gap-2"><div className="truncate text-xs text-slate-500">{c.kind === "comment" && "💬 "}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[10px] px-1.5 min-w-[18px] text-center">{g.unread}</span>}</div>
                 <div className="flex gap-1 mt-1 flex-wrap">{c.person_phone && <span className="chip bg-emerald-50 text-emerald-700">📞 {c.person_phone}</span>}{c.labels?.slice(0, 2).map((l) => <span key={l} className="chip bg-slate-100 text-slate-600">{l}</span>)}{c.assignee_name && <span className="chip bg-blue-50 text-blue-700">{c.assignee_name}</span>}</div>
               </div>
-            </button>
-          ))}
+            </button>); })}
         </div>
       </div>
       {/* cột 2: thread */}
       <div className="flex-1 min-w-0 flex flex-col bg-[#eef1f6]">
-        {current ? <Thread key={current.id} conv={current} labels={labels} members={members} knowledge={knowledge} /> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
+        {current ? <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} /> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
       </div>
       {/* cột 3: panel khách */}
       {current && <PersonPanel key={"p" + current.id} conv={current} members={members} />}
