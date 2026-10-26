@@ -10,7 +10,7 @@ export default async function InboxPage() {
     sb.from("crm_labels").select("*").eq("scope", "conversation").order("sort_order"),
     sb.from("crm_members").select("id,name,avatar_url,role,is_online").eq("is_active", true),
     sb.from("crm_v_channels").select("*"),
-    sb.from("crm_knowledge").select("id,title,shortcut,content").eq("kind", "message").limit(200),
+    sb.from("crm_knowledge").select("id,title,shortcut,content").in("kind", ["message", "text", "faq", "script"]).order("title").limit(300),
   ]);
   return <InboxClient initial={convs || []} labels={labels || []} members={members || []} channels={channels || []} knowledge={knowledge || []} />;
 }
