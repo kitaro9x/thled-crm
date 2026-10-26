@@ -74,7 +74,7 @@ async function main() {
       else if (d.msgType === "chat.voice") { type = "audio"; attachments.push({ type: "audio", url: d.content?.href }); }
       else if (d.msgType === "share.file") { type = "file"; attachments.push({ type: "file", url: d.content?.href, name: d.content?.title }); }
       let senderName = d.dName, avatar, phone;
-      if (!isSelf) { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.displayName || p.zaloName || senderName; avatar = p.avatar; phone = p.phoneNumber; } }
+      if (!isSelf) { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || senderName; avatar = p.avatar; phone = p.phoneNumber; } }
       await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in" });
     } catch (e) { console.error("msg err", e.message); }
   });
