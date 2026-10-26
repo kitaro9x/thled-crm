@@ -23,6 +23,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [convLabels, setConvLabels] = useState<string[]>(conv.labels || []);
   const [err, setErr] = useState<string | null>(null);
   const [files, setFiles] = useState<{ file: File; preview: string }[]>([]);
+  const [showQuick, setShowQuick] = useState(false); const [quickQ, setQuickQ] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -137,8 +138,17 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }} onDragOver={(e) => e.preventDefault()} />
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
         <div className="flex items-center gap-2 mt-2">
-          <div className="relative group"><button className="btn px-2" title="Trả lời nhanh"><Zap size={14} /></button>
-            <div className="hidden group-hover:block absolute bottom-9 left-0 z-10 card w-72 max-h-64 overflow-auto shadow-lg p-1">{knowledge.length === 0 && <div className="p-2 text-xs text-slate-400">Chưa có nội dung trong Kho tri thức</div>}{knowledge.map((k) => <button key={k.id} onClick={() => setText(fill(k.content))} className="block w-full text-left px-2 py-1.5 text-sm hover:bg-slate-50 rounded"><b>{k.shortcut}</b> {k.title}</button>)}</div>
+          <div className="relative"><button className={cn("btn px-2", showQuick && "bg-blue-50 border-blue-300")} title="Trả lời nhanh" onClick={() => setShowQuick((v) => !v)}><Zap size={14} /></button>
+            {showQuick && <div className="absolute bottom-9 left-0 z-20 card w-80 shadow-lg p-1">
+              <input autoFocus className="input mb-1" placeholder="Tìm trả lời nhanh… (hoặc gõ /phím_tắt trong ô chat)" value={quickQ} onChange={(e) => setQuickQ(e.target.value)} />
+              <div className="max-h-64 overflow-auto">
+                {knowledge.length === 0 && <div className="p-2 text-xs text-slate-400">Chưa có nội dung trong Kho tri thức</div>}
+                {knowledge.filter((k) => !quickQ || (k.title + " " + (k.shortcut || "") + " " + k.content).toLowerCase().includes(quickQ.toLowerCase())).map((k) => (
+                  <button key={k.id} onClick={() => { setText(fill(k.content)); setShowQuick(false); setQuickQ(""); }} className="block w-full text-left px-2 py-1.5 text-sm hover:bg-slate-50 rounded">
+                    <div><b className="text-blue-700">{k.shortcut}</b> {k.title}</div><div className="text-[11px] text-slate-400 truncate">{k.content}</div>
+                  </button>))}
+              </div>
+            </div>}
           </div>
           <button className="btn px-2" title="Đính kèm ảnh / video / PDF" onClick={() => fileRef.current?.click()}><Paperclip size={14} /></button>
           <label className="btn px-2 text-xs" title="Hẹn giờ gửi"><Clock size={14} /><input type="datetime-local" className="ml-1 text-xs outline-none" value={schedule} onChange={(e) => setSchedule(e.target.value)} /></label>
