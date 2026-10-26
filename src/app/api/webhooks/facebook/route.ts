@@ -45,7 +45,12 @@ export async function POST(req: NextRequest) {
           if (dup) continue;
         }
         const referral = m.referral || m.message?.referral || m.postback?.referral;
-        const profile = !isEcho && pageToken ? await fbGetProfile(pageToken, senderId) : null;
+        // lấy tên: chỉ gọi khi chưa có tên (tiết kiệm API) hoặc tin đến từ khách
+        let profile: { name?: string; profile_pic?: string } | null = null;
+        if (pageToken) {
+          const { data: idn } = await db.from("crm_identities").select("display_name,avatar_url").eq("channel_id", channel!.id).eq("external_id", senderId).maybeSingle();
+          if (!idn?.display_name || (!isEcho && !idn?.avatar_url)) profile = await fbGetProfile(pageToken, senderId, pageId);
+        }
         const atts = (m.message.attachments || []).map((a: any) => ({ type: a.type === "image" ? "image" : a.type === "video" ? "video" : a.type === "audio" ? "audio" : "file", url: a.payload?.url, name: a.payload?.title }));
         await ingestMessage(db, {
           channelType: "fb_page", channelExternalId: pageId, senderExternalId: senderId,

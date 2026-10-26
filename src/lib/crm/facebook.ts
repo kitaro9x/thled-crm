@@ -11,10 +11,24 @@ export async function fbSendMessage(pageToken: string, psid: string, text?: stri
   return j as { message_id: string };
 }
 
-export async function fbGetProfile(pageToken: string, psid: string) {
-  const r = await fetch(`${GRAPH}/${psid}?fields=name,profile_pic&access_token=${pageToken}`);
-  if (!r.ok) return null;
-  return (await r.json()) as { name?: string; profile_pic?: string };
+/**
+ * Hồ sơ người nhắn. API hồ sơ (/{psid}) chỉ trả tên cho người có vai trò trong app khi app ở Standard Access,
+ * nên fallback sang Conversations API của page (participants có name) — cách này dùng được với page của chính mình.
+ */
+export async function fbGetProfile(pageToken: string, psid: string, pageId?: string) {
+  try {
+    const r = await fetch(`${GRAPH}/${psid}?fields=name,profile_pic&access_token=${pageToken}`);
+    if (r.ok) { const j = (await r.json()) as { name?: string; profile_pic?: string }; if (j?.name) return j; }
+  } catch {}
+  if (!pageId) return null;
+  try {
+    const r = await fetch(`${GRAPH}/${pageId}/conversations?platform=messenger&user_id=${psid}&fields=participants,senders&access_token=${pageToken}`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const parts: { id: string; name?: string }[] = j?.data?.[0]?.participants?.data || j?.data?.[0]?.senders?.data || [];
+    const me = parts.find((x) => x.id === psid) || parts.find((x) => x.id !== pageId);
+    return me?.name ? { name: me.name } : null;
+  } catch { return null; }
 }
 
 export async function fbReplyComment(pageToken: string, commentId: string, message: string) {

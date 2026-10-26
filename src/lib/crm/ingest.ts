@@ -132,7 +132,12 @@ async function applyLeadSources(
       const { data: cur } = await db.from("crm_customers").select("name,zalo,source_channel_id").eq("id", personId).single();
       const { data: ch } = await db.from("crm_channels").select("type").eq("id", a.channelId).single();
       if (ch?.type === "fb_page" && cur && cur.name !== a.identity.display_name && (!cur.name || cur.name === cur.zalo || /^(Khách mới|0\d{9})$/.test(cur.name))) await db.from("crm_customers").update({ name: a.identity.display_name }).eq("id", personId);
-      if (ch?.type === "zalo_personal" && cur && !cur.zalo) await db.from("crm_customers").update({ zalo: a.identity.display_name }).eq("id", personId);
+      if (ch?.type === "zalo_personal" && cur) {
+        const patch: Record<string, string> = {};
+        if (!cur.zalo) patch.zalo = a.identity.display_name;
+        if (!cur.name || /^(Khách mới|0\d{9})$/.test(cur.name)) patch.name = a.identity.display_name; // chưa có tên FB → dùng tên Zalo
+        if (Object.keys(patch).length) await db.from("crm_customers").update(patch).eq("id", personId);
+      }
     }
     if (personId && a.phone && hadPerson) {
       // khách đã có: thiếu phone → điền; có phone khác → lưu vào custom.phones (SĐT phụ)

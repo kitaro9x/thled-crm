@@ -116,7 +116,12 @@ async function main() {
             if (!found?.uid) { await sb.from("crm_zalo_friend_tasks").update({ status: "not_found", last_error: "Không tìm thấy Zalo", attempts: t.attempts + 1 }).eq("id", t.id); continue; }
             const foundName = found.zalo_name || found.display_name;
             await sb.from("crm_zalo_friend_tasks").update({ zalo_uid: found.uid, zalo_name: foundName }).eq("id", t.id);
-            if (t.customer_id && foundName) await sb.from("crm_customers").update({ zalo: foundName }).eq("id", t.customer_id).is("zalo", null);
+            if (t.customer_id && foundName) {
+              const { data: cu } = await sb.from("crm_customers").select("name,zalo").eq("id", t.customer_id).single();
+              const patch = {}; if (!cu?.zalo) patch.zalo = foundName;
+              if (!cu?.name || /^(Khách mới|0\d{9})$/.test(cu.name)) patch.name = foundName; // chưa có tên FB → dùng tên Zalo
+              if (Object.keys(patch).length) await sb.from("crm_customers").update(patch).eq("id", t.customer_id);
+            }
             if (found.isFr === 1) {
               await sb.from("crm_zalo_friend_tasks").update({ status: "accepted", done_at: new Date().toISOString() }).eq("id", t.id);
             } else {
