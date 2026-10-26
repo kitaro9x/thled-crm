@@ -47,7 +47,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   useEffect(() => {
     sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at").limit(400).then(({ data }) => setMsgs((data as Message[]) || []));
     sb.from("crm_conversations").update({ unread_count: 0 }).in("id", ids).then(() => {});
-    const ch = sb.channel("thread-" + ids.join("_")).on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => (m.some((x) => x.id === (p.new as Message).id) ? m : [...m, p.new as Message].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || ""))))).subscribe();
+    const ch = sb.channel("thread-" + ids.join("_")).on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => (m.some((x) => x.id === (p.new as Message).id) ? m : [...m.filter((x) => !(x.id.startsWith("tmp-") && x.direction === "out" && x.text === (p.new as Message).text)), p.new as Message].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || ""))))).subscribe();
     return () => { sb.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv.id]);
@@ -57,10 +57,14 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     if (!text.trim() && !files.length) return; setSending(true); setErr(null);
     let attachments: { type: string; url: string; name: string }[] = [];
     try { setUploading(true); attachments = await uploadAll(); } catch (e: any) { setErr(e.message); setSending(false); setUploading(false); return; } finally { setUploading(false); }
-    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: target.id, text: text.trim() || undefined, attachments, scheduled_at: schedule || undefined }) });
-    const j = await r.json(); setSending(false);
-    if (!r.ok) { setErr(j.error || "Gửi thất bại"); return; }
+    // hiện tin ngay (optimistic), server xác nhận sau; realtime sẽ thay bằng bản thật
+    const tmpId = "tmp-" + Date.now(); const body = text.trim(); const sched = schedule;
+    if (!sched) setMsgs((m) => [...m, { id: tmpId, conversation_id: target.id, direction: "out", type: attachments[0]?.type || "text", text: body || null, attachments, status: "queued", sent_at: new Date().toISOString(), created_at: new Date().toISOString() } as Message]);
     setText(""); setSchedule(""); setFiles([]);
+    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: target.id, text: body || undefined, attachments, scheduled_at: sched || undefined }) });
+    const j = await r.json(); setSending(false);
+    if (!r.ok) { setErr(j.error || "Gửi thất bại"); setMsgs((m) => m.map((x) => (x.id === tmpId ? { ...x, status: "failed" } : x))); return; }
+    if (!sched) setMsgs((m) => m.map((x) => (x.id === tmpId ? { ...x, status: "sent" } : x)));
   };
   const toggleLabel = async (name: string) => {
     const next = convLabels.includes(name) ? convLabels.filter((l) => l !== name) : [...convLabels, name];

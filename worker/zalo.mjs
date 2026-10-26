@@ -109,6 +109,12 @@ async function main() {
   });
   api.listener.start();
 
+  // Nhận tin mới trong crm_outbox tức thì qua realtime (thay vì chờ vòng quét)
+  let wake = null; const kick = () => { if (wake) { const w = wake; wake = null; w(); } };
+  sb.channel("worker-outbox").on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_outbox" }, kick)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_zalo_friend_tasks" }, kick).subscribe();
+  const waitTick = (ms) => new Promise((r) => { wake = r; setTimeout(() => { if (wake === r) { wake = null; r(); } }, ms); });
+
   // 3+4. vòng lặp outbox & friend tasks
   while (true) {
     try {
@@ -172,7 +178,7 @@ async function main() {
         }
       }
     } catch (e) { console.error("loop err", e.message); await setWorker({ last_error: e.message }); }
-    await sleep(15000);
+    await waitTick(5000);
   }
 }
 main().catch(async (e) => { console.error(e); await setWorker({ state: "offline", last_error: e.message }); process.exit(1); });
