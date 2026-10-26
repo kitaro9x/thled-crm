@@ -35,6 +35,11 @@ async function ingest(payload) {
   if (!r.ok) console.error("ingest fail", await r.text());
 }
 
+/** Ghi tin do worker gửi (lời chào sau kết bạn…) vào CRM để hội thoại Zalo xuất hiện và gộp với khách */
+async function recordOutgoing(own, uid, name, text) {
+  await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: name, text, type: "text", attachments: [], externalMsgId: `worker-${uid}-${Date.now()}`, sentAt: new Date().toISOString(), direction: "out" });
+}
+
 async function main() {
   const zalo = new Zalo();
   let api;
@@ -109,7 +114,9 @@ async function main() {
           try {
             const found = await api.findUser(t.phone);
             if (!found?.uid) { await sb.from("crm_zalo_friend_tasks").update({ status: "not_found", last_error: "Không tìm thấy Zalo", attempts: t.attempts + 1 }).eq("id", t.id); continue; }
-            await sb.from("crm_zalo_friend_tasks").update({ zalo_uid: found.uid, zalo_name: found.display_name || found.zalo_name }).eq("id", t.id);
+            const foundName = found.zalo_name || found.display_name;
+            await sb.from("crm_zalo_friend_tasks").update({ zalo_uid: found.uid, zalo_name: foundName }).eq("id", t.id);
+            if (t.customer_id && foundName) await sb.from("crm_customers").update({ zalo: foundName }).eq("id", t.customer_id).is("zalo", null);
             if (found.isFr === 1) {
               await sb.from("crm_zalo_friend_tasks").update({ status: "accepted", done_at: new Date().toISOString() }).eq("id", t.id);
             } else {
@@ -117,7 +124,7 @@ async function main() {
               await sb.from("crm_zalo_friend_tasks").update({ status: "sent", done_at: new Date().toISOString(), attempts: t.attempts + 1 }).eq("id", t.id);
             }
             // liên kết identity ↔ customer để hội thoại sau này gắn đúng khách
-            if (t.customer_id) { const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").eq("external_id", String(own)).single(); if (ch) await sb.from("crm_identities").upsert({ channel_id: ch.id, channel: "zalo_personal", external_id: String(found.uid), display_name: found.display_name, avatar_url: found.avatar, phone: t.phone, customer_id: t.customer_id }, { onConflict: "channel_id,external_id" }); }
+            if (t.customer_id) { const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").eq("external_id", String(own)).single(); if (ch) await sb.from("crm_identities").upsert({ channel_id: ch.id, channel: "zalo_personal", external_id: String(found.uid), display_name: foundName, avatar_url: found.avatar, phone: t.phone, customer_id: t.customer_id }, { onConflict: "channel_id,external_id" }); }
             await sleep(rnd(20000, 60000));
           } catch (e) { await sb.from("crm_zalo_friend_tasks").update({ status: t.attempts >= 2 ? "failed" : "todo", last_error: e.message, attempts: t.attempts + 1 }).eq("id", t.id); }
         }
@@ -127,8 +134,13 @@ async function main() {
       for (const t of sent || []) {
         const info = await api.getUserInfo(t.zalo_uid).catch(() => null); const p = info?.changed_profiles?.[t.zalo_uid];
         if (p?.isFr === 1) {
-          await sb.from("crm_zalo_friend_tasks").update({ status: "accepted" }).eq("id", t.id);
-          if (t.after_accept_message) { await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User); await sleep(rnd(2000, 4000)); }
+          await sb.from("crm_zalo_friend_tasks").update({ status: "accepted", accepted_at: new Date().toISOString() }).eq("id", t.id);
+          console.log("Đã kết bạn:", t.phone, t.zalo_name);
+          if (t.after_accept_message) {
+            await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User);
+            await recordOutgoing(own, t.zalo_uid, t.zalo_name || p.zaloName || p.displayName, t.after_accept_message);
+            await sleep(rnd(2000, 4000));
+          }
         }
       }
     } catch (e) { console.error("loop err", e.message); await setWorker({ last_error: e.message }); }

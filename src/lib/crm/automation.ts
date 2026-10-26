@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AutomationRule, RuleCondition, RuleEvent } from "@/lib/types";
+import { fbSendMessage } from "@/lib/crm/facebook";
 import { pickAssignee } from "./distribution";
 
 /** Render {fullname} {gender} {phone} + spin #text{a|b} */
@@ -113,7 +114,16 @@ export async function runAutomation(db: SupabaseClient, leadId: string, events: 
             const { data: conv } = await db.from("crm_v_conversations").select("channel_id,channel_type,external_id").eq("id", lead.source_conversation_id).single();
             if (conv && conv.channel_type !== "zalo_personal") {
               const text = renderTemplate(cfg.notify_text, ctx);
-              await db.from("crm_outbox").insert({ conversation_id: lead.source_conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, source: "automation" });
+              if (conv.channel_type === "fb_page") {
+                // gửi Messenger ngay (trong cửa sổ 24h), không chờ cron
+                const { data: ch } = await db.from("crm_channels").select("credentials").eq("id", conv.channel_id).single();
+                try {
+                  const res = await fbSendMessage(ch?.credentials?.page_access_token, conv.external_id, text);
+                  await db.from("crm_messages").insert({ conversation_id: lead.source_conversation_id, direction: "out", type: "text", text, external_msg_id: res?.message_id, status: "sent" });
+                } catch (e: any) { await log("error", "Gửi FB thất bại: " + e.message); }
+              } else {
+                await db.from("crm_outbox").insert({ conversation_id: lead.source_conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, source: "automation" });
+              }
             }
           }
           break;
