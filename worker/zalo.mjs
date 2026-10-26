@@ -107,7 +107,9 @@ async function main() {
         const { data: conv } = await sb.from("crm_v_conversations").select("id").eq("channel_type", "zalo_personal").eq("external_id", String(uid)).limit(1).maybeSingle();
         if (conv) {
           const since = new Date(Date.now() - 2 * 60000).toISOString();
-          const { data: dup } = await sb.from("crm_messages").select("id,status").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).or(`text.eq.${JSON.stringify(text || "")},type.neq.text`).order("created_at", { ascending: false }).limit(1).maybeSingle();
+          const { data: recent } = await sb.from("crm_messages").select("id,status,text,type,external_msg_id").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).order("created_at", { ascending: false }).limit(10);
+          const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
+          const dup = (recent || []).find((r) => !r.external_msg_id && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
           if (dup) { await sb.from("crm_messages").update({ status: "sent", external_msg_id: String(d.msgId) }).eq("id", dup.id); return; }
         }
       }
