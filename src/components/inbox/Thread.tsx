@@ -31,13 +31,27 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     if (ok.length < Array.from(list).length) setErr("Chỉ nhận ảnh jpg/png/webp/gif, video mp4/mov, PDF — tối đa 25 MB");
     setFiles((fs) => [...fs, ...ok.map((file) => ({ file, preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : "" }))]);
   };
+  /** Nén ảnh trên trình duyệt: tối đa 1600px cạnh dài, JPEG 0.85 (GIF giữ nguyên) */
+  const compressImage = (file: File): Promise<File> => new Promise((resolve) => {
+    if (!file.type.startsWith("image/") || file.type === "image/gif" || file.size < 300 * 1024) return resolve(file);
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const max = 1600; const sc = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas"); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => { URL.revokeObjectURL(url); resolve(b && b.size < file.size ? new File([b], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file); }, "image/jpeg", 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
   const uploadAll = async () => {
     const out: { type: string; url: string; name: string }[] = [];
-    for (const { file } of files) {
+    for (const { file: raw } of files) {
+      const file = await compressImage(raw);
       const ext = (file.name.split(".").pop() || "bin").toLowerCase();
       const path = `${conv.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error } = await sb.storage.from("crm-media").upload(path, file, { contentType: file.type, upsert: false });
-      if (error) throw new Error("Upload lỗi: " + error.message);
+      if (error) throw new Error(`Không tải được "${raw.name}" (${(file.size / 1024 / 1024).toFixed(1)} MB): ${error.message}`);
       const { data } = sb.storage.from("crm-media").getPublicUrl(path);
       out.push({ type: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file", url: data.publicUrl, name: file.name });
     }
