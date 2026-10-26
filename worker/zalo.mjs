@@ -22,6 +22,30 @@ const APP_URL = process.env.APP_URL || "http://localhost:3000";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rnd = (a, b) => a + Math.floor(Math.random() * (b - a));
 
+/** Tải file từ URL (Supabase Storage) thành Buffer để zca-js upload */
+async function fetchAttachment(a) {
+  const r = await fetch(a.url); if (!r.ok) throw new Error("Tải đính kèm lỗi " + r.status);
+  const data = Buffer.from(await r.arrayBuffer());
+  const name = (a.name && /\.[a-z0-9]+$/i.test(a.name)) ? a.name.replace(/[^\w.\-]+/g, "_") : `file.${(a.url.split("?")[0].split(".").pop() || "bin")}`;
+  return { data, filename: name, metadata: { totalSize: data.length } };
+}
+/** Gửi 1 tin kèm đính kèm qua Zalo: ảnh/file → sendMessage(attachments); video → sendVideo (cần URL public) */
+async function zaloSend(api, uid, text, attachments) {
+  const atts = attachments || [];
+  if (!atts.length) return api.sendMessage(text || "", uid, ThreadType.User);
+  const videos = atts.filter((a) => a.type === "video"); const others = atts.filter((a) => a.type !== "video");
+  if (others.length) {
+    const files = []; for (const a of others) files.push(await fetchAttachment(a));
+    await api.sendMessage({ msg: text || "", attachments: files }, uid, ThreadType.User);
+  } else if (text) await api.sendMessage(text, uid, ThreadType.User);
+  for (const v of videos) {
+    try { await api.sendVideo({ msg: "", videoUrl: v.url, thumbnailUrl: v.thumb || v.url }, uid, ThreadType.User); }
+    catch (e) { // fallback: gửi như file
+      const f = await fetchAttachment(v); await api.sendMessage({ msg: "", attachments: [f] }, uid, ThreadType.User);
+    }
+  }
+}
+
 async function setWorker(patch) { await sb.from("crm_zalo_worker").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1); }
 
 // Gói Vercel Hobby chỉ cho cron 1 lần/ngày → worker gọi job mỗi phút thay thế
@@ -96,10 +120,9 @@ async function main() {
       for (const o of out || []) {
         if (o.crm_channels?.type !== "zalo_personal") continue;
         try {
-          if (o.attachments?.[0]?.url && o.attachments[0].type === "image") await api.sendMessage({ msg: o.text || "", attachments: [o.attachments[0].url] }, o.external_id, ThreadType.User);
-          else await api.sendMessage(o.text, o.external_id, ThreadType.User);
+          await zaloSend(api, o.external_id, o.text, o.attachments);
           await sb.from("crm_outbox").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", o.id);
-          await sb.from("crm_messages").update({ status: "sent" }).eq("conversation_id", o.conversation_id).eq("status", "queued").eq("text", o.text);
+          await sb.from("crm_messages").update({ status: "sent" }).eq("conversation_id", o.conversation_id).eq("status", "queued");
           if (o.source !== "manual") await sb.from("crm_messages").insert({ conversation_id: o.conversation_id, direction: "out", type: "text", text: o.text, attachments: o.attachments, status: "sent" });
           await sleep(rnd(2000, 5000));
         } catch (e) { await sb.from("crm_outbox").update({ status: "failed", error: e.message }).eq("id", o.id); }

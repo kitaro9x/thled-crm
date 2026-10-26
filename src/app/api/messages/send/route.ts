@@ -27,8 +27,13 @@ export async function POST(req: NextRequest) {
   if (channel?.type === "fb_page") {
     try {
       const token = channel.credentials?.page_access_token;
-      const res = await fbSendMessage(token, conv.external_id, text, attachments[0]?.url);
-      await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text, attachments, external_msg_id: res.message_id, sender_member_id: user.id, status: "sent" });
+      let lastId: string | undefined;
+      if (text) { const res = await fbSendMessage(token, conv.external_id, text); lastId = res.message_id; }
+      for (const a of attachments as { type: string; url: string; name?: string }[]) {
+        const res = await fbSendMessage(token, conv.external_id, undefined, a.url, undefined, (["image", "video", "audio"].includes(a.type) ? a.type : "file") as any);
+        lastId = res.message_id;
+      }
+      await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text: text || null, attachments, external_msg_id: lastId, sender_member_id: user.id, status: "sent" });
       return NextResponse.json({ ok: true });
     } catch (e: any) {
       return NextResponse.json({ error: e.message }, { status: 400 });
@@ -37,6 +42,6 @@ export async function POST(req: NextRequest) {
 
   // Zalo cá nhân / kênh khác: xếp hàng, worker gửi và ghi crm_messages
   await db.from("crm_outbox").insert({ conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, attachments, sent_by: user.id, source: "manual" });
-  await db.from("crm_messages").insert({ conversation_id, direction: "out", type: "text", text, attachments, sender_member_id: user.id, status: "queued" });
+  await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text: text || null, attachments, sender_member_id: user.id, status: "queued" });
   return NextResponse.json({ ok: true, queued: true });
 }

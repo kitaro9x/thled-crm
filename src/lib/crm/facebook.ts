@@ -1,7 +1,7 @@
 const GRAPH = "https://graph.facebook.com/v21.0";
 
-export async function fbSendMessage(pageToken: string, psid: string, text?: string, attachmentUrl?: string, tag?: string) {
-  const message: any = text ? { text } : attachmentUrl ? { attachment: { type: "image", payload: { url: attachmentUrl, is_reusable: true } } } : null;
+export async function fbSendMessage(pageToken: string, psid: string, text?: string, attachmentUrl?: string, tag?: string, attachmentType: "image" | "video" | "audio" | "file" = "image") {
+  const message: any = text ? { text } : attachmentUrl ? { attachment: { type: attachmentType, payload: { url: attachmentUrl, is_reusable: true } } } : null;
   if (!message) throw new Error("empty message");
   const body: any = { recipient: { id: psid }, message, messaging_type: tag ? "MESSAGE_TAG" : "RESPONSE" };
   if (tag) body.tag = tag; // vd POST_PURCHASE_UPDATE / CONFIRMED_EVENT_UPDATE để gửi sau 24h đúng chính sách

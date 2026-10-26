@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -22,7 +22,27 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [showAssign, setShowAssign] = useState(false);
   const [convLabels, setConvLabels] = useState<string[]>(conv.labels || []);
   const [err, setErr] = useState<string | null>(null);
+  const [files, setFiles] = useState<{ file: File; preview: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const addFiles = (list: FileList | File[]) => {
+    const ok = Array.from(list).filter((f) => /^(image\/(jpeg|png|webp|gif)|video\/(mp4|quicktime)|application\/pdf)$/.test(f.type) && f.size <= 25 * 1024 * 1024);
+    if (ok.length < Array.from(list).length) setErr("Chỉ nhận ảnh jpg/png/webp/gif, video mp4/mov, PDF — tối đa 25 MB");
+    setFiles((fs) => [...fs, ...ok.map((file) => ({ file, preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : "" }))]);
+  };
+  const uploadAll = async () => {
+    const out: { type: string; url: string; name: string }[] = [];
+    for (const { file } of files) {
+      const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+      const path = `${conv.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error } = await sb.storage.from("crm-media").upload(path, file, { contentType: file.type, upsert: false });
+      if (error) throw new Error("Upload lỗi: " + error.message);
+      const { data } = sb.storage.from("crm-media").getPublicUrl(path);
+      out.push({ type: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "file", url: data.publicUrl, name: file.name });
+    }
+    return out;
+  };
 
   useEffect(() => {
     sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at").limit(400).then(({ data }) => setMsgs((data as Message[]) || []));
@@ -34,11 +54,13 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs.length]);
 
   const send = async () => {
-    if (!text.trim()) return; setSending(true); setErr(null);
-    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: target.id, text: text.trim(), scheduled_at: schedule || undefined }) });
+    if (!text.trim() && !files.length) return; setSending(true); setErr(null);
+    let attachments: { type: string; url: string; name: string }[] = [];
+    try { setUploading(true); attachments = await uploadAll(); } catch (e: any) { setErr(e.message); setSending(false); setUploading(false); return; } finally { setUploading(false); }
+    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: target.id, text: text.trim() || undefined, attachments, scheduled_at: schedule || undefined }) });
     const j = await r.json(); setSending(false);
     if (!r.ok) { setErr(j.error || "Gửi thất bại"); return; }
-    setText(""); setSchedule("");
+    setText(""); setSchedule(""); setFiles([]);
   };
   const toggleLabel = async (name: string) => {
     const next = convLabels.includes(name) ? convLabels.filter((l) => l !== name) : [...convLabels, name];
@@ -76,7 +98,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <div key={m.id} className={cn("flex", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.direction === "out" ? "bg-blue-600 text-white rounded-br-sm" : "bg-white rounded-bl-sm")}>
-              {m.attachments?.map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" /></a> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">{a.name || a.type}</a>)}
+              {m.attachments?.map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.text && <div className="whitespace-pre-wrap break-words">{m.text}</div>}
               <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
             </div>
@@ -88,13 +110,18 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
         {conv.scheduled_message && <div className="text-xs text-amber-700 mb-1 flex items-center gap-1"><Clock size={12} /> Tin hẹn giờ: “{conv.scheduled_message.text}” lúc {dt(conv.scheduled_message.send_at, "HH:mm dd/MM")}</div>}
         {err && <div className="text-xs text-red-600 mb-1">{err}</div>}
         {multi && <div className="flex items-center gap-1 mb-2 text-xs text-slate-500">Trả lời qua:{all.map((c) => <button key={c.id} onClick={() => setTarget(c)} className={cn("chip border flex items-center gap-1", target.id === c.id ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-200 text-slate-600")}><ChannelIcon type={c.channel_type} size={12} />{c.channel_type === "zalo_personal" ? "Zalo" : c.kind === "comment" ? "FB bình luận" : "Messenger"}</button>)}</div>}
-        <textarea className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
+        {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
+        <textarea className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
+          onPaste={(e) => { const fs = Array.from(e.clipboardData.files || []); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
+          onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }} onDragOver={(e) => e.preventDefault()} />
+        <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
         <div className="flex items-center gap-2 mt-2">
           <div className="relative group"><button className="btn px-2" title="Trả lời nhanh"><Zap size={14} /></button>
             <div className="hidden group-hover:block absolute bottom-9 left-0 z-10 card w-72 max-h-64 overflow-auto shadow-lg p-1">{knowledge.length === 0 && <div className="p-2 text-xs text-slate-400">Chưa có nội dung trong Kho tri thức</div>}{knowledge.map((k) => <button key={k.id} onClick={() => setText(k.content)} className="block w-full text-left px-2 py-1.5 text-sm hover:bg-slate-50 rounded"><b>{k.shortcut}</b> {k.title}</button>)}</div>
           </div>
+          <button className="btn px-2" title="Đính kèm ảnh / video / PDF" onClick={() => fileRef.current?.click()}><Paperclip size={14} /></button>
           <label className="btn px-2 text-xs" title="Hẹn giờ gửi"><Clock size={14} /><input type="datetime-local" className="ml-1 text-xs outline-none" value={schedule} onChange={(e) => setSchedule(e.target.value)} /></label>
-          <button className="btn btn-primary ml-auto" onClick={send} disabled={sending || !text.trim()}><Send size={14} /> {schedule ? "Hẹn gửi" : "Gửi"}</button>
+          <button className="btn btn-primary ml-auto" onClick={send} disabled={sending || (!text.trim() && !files.length)}><Send size={14} /> {uploading ? "Đang tải lên…" : schedule ? "Hẹn gửi" : "Gửi"}</button>
         </div>
       </div>
     </>
