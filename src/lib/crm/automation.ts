@@ -110,8 +110,11 @@ export async function runAutomation(db: SupabaseClient, leadId: string, events: 
             context: JSON.stringify({ zalo_uid: cfg.account_mode === "fixed" ? cfg.zalo_uid : owner?.zalo_uid, notify_text: cfg.notify_text }),
           });
           if (cfg.notify_old_channel && lead.source_conversation_id && cfg.notify_text) {
-            const { data: conv } = await db.from("crm_conversations").select("channel_id,channel").eq("id", lead.source_conversation_id).single();
-            if (conv && conv.channel !== "zalo_personal") await db.from("crm_outbox").insert({ conversation_id: lead.source_conversation_id, channel_id: conv.channel_id, external_id: "", text: renderTemplate(cfg.notify_text, ctx), source: "automation" });
+            const { data: conv } = await db.from("crm_v_conversations").select("channel_id,channel_type,external_id").eq("id", lead.source_conversation_id).single();
+            if (conv && conv.channel_type !== "zalo_personal") {
+              const text = renderTemplate(cfg.notify_text, ctx);
+              await db.from("crm_outbox").insert({ conversation_id: lead.source_conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, source: "automation" });
+            }
           }
           break;
         }
