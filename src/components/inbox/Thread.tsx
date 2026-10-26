@@ -70,11 +70,14 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
+  // điền biến {fullname} {gender} {phone} khi chèn trả lời nhanh
+  const fill = (t: string) => t.replace(/\{fullname\}/g, conv.person_name || conv.display_name || "anh/chị").replace(/\{gender\}/g, "anh/chị").replace(/\{phone\}/g, conv.person_phone || "");
   // phím tắt /xxx từ kho tri thức
   useEffect(() => {
     const m = text.match(/^\/(\S+)$/); if (!m) return;
     const k = knowledge.find((x) => x.shortcut === "/" + m[1] || x.shortcut === m[1]);
-    if (k) setText(k.content);
+    if (k) setText(fill(k.content));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, knowledge]);
 
   return (
@@ -117,7 +120,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
         <div className="flex items-center gap-2 mt-2">
           <div className="relative group"><button className="btn px-2" title="Trả lời nhanh"><Zap size={14} /></button>
-            <div className="hidden group-hover:block absolute bottom-9 left-0 z-10 card w-72 max-h-64 overflow-auto shadow-lg p-1">{knowledge.length === 0 && <div className="p-2 text-xs text-slate-400">Chưa có nội dung trong Kho tri thức</div>}{knowledge.map((k) => <button key={k.id} onClick={() => setText(k.content)} className="block w-full text-left px-2 py-1.5 text-sm hover:bg-slate-50 rounded"><b>{k.shortcut}</b> {k.title}</button>)}</div>
+            <div className="hidden group-hover:block absolute bottom-9 left-0 z-10 card w-72 max-h-64 overflow-auto shadow-lg p-1">{knowledge.length === 0 && <div className="p-2 text-xs text-slate-400">Chưa có nội dung trong Kho tri thức</div>}{knowledge.map((k) => <button key={k.id} onClick={() => setText(fill(k.content))} className="block w-full text-left px-2 py-1.5 text-sm hover:bg-slate-50 rounded"><b>{k.shortcut}</b> {k.title}</button>)}</div>
           </div>
           <button className="btn px-2" title="Đính kèm ảnh / video / PDF" onClick={() => fileRef.current?.click()}><Paperclip size={14} /></button>
           <label className="btn px-2 text-xs" title="Hẹn giờ gửi"><Clock size={14} /><input type="datetime-local" className="ml-1 text-xs outline-none" value={schedule} onChange={(e) => setSchedule(e.target.value)} /></label>
