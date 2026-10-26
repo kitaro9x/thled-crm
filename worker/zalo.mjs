@@ -102,6 +102,15 @@ async function main() {
       const d = m.data; const isSelf = m.isSelf;
       const uid = isSelf ? d.toUid || m.threadId : d.uidFrom || m.threadId;
       let text = typeof d.content === "string" ? d.content : d.content?.title || d.content?.description || "";
+      // tin do chính CRM/worker vừa gửi → đã có trong crm_messages, chỉ cập nhật trạng thái, không ghi đôi
+      if (isSelf) {
+        const { data: conv } = await sb.from("crm_v_conversations").select("id").eq("channel_type", "zalo_personal").eq("external_id", String(uid)).limit(1).maybeSingle();
+        if (conv) {
+          const since = new Date(Date.now() - 2 * 60000).toISOString();
+          const { data: dup } = await sb.from("crm_messages").select("id,status").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).or(`text.eq.${JSON.stringify(text || "")},type.neq.text`).order("created_at", { ascending: false }).limit(1).maybeSingle();
+          if (dup) { await sb.from("crm_messages").update({ status: "sent", external_msg_id: String(d.msgId) }).eq("id", dup.id); return; }
+        }
+      }
       let type = "text"; const attachments = [];
       if (d.msgType === "chat.photo" || d.content?.href?.match(/\.(jpg|png|jpeg|webp)/)) { type = "image"; attachments.push({ type: "image", url: d.content?.href || d.content?.thumb }); text = d.content?.title || ""; }
       else if (d.msgType === "chat.sticker") { type = "sticker"; text = "[Sticker]"; }

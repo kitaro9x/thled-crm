@@ -63,7 +63,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   useEffect(() => {
     sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at").limit(400).then(({ data }) => setMsgs((data as Message[]) || []));
     sb.from("crm_conversations").update({ unread_count: 0 }).in("id", ids).then(() => {});
-    const ch = sb.channel("thread-" + ids.join("_")).on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => (m.some((x) => x.id === (p.new as Message).id) ? m : [...m.filter((x) => !(x.id.startsWith("tmp-") && x.direction === "out" && x.text === (p.new as Message).text)), p.new as Message].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || ""))))).subscribe();
+    const ch = sb.channel("thread-" + ids.join("_")).on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => (m.some((x) => x.id === (p.new as Message).id) ? m : [...m.filter((x) => !(x.id.startsWith("tmp-") && x.direction === "out" && x.text === (p.new as Message).text)), p.new as Message].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || "")))))
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => m.map((x) => (x.id === (p.new as Message).id ? { ...x, ...(p.new as Message) } : x)))).subscribe();
     return () => { sb.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv.id]);
