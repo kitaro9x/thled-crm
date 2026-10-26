@@ -5,6 +5,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { cn, dt } from "@/lib/utils";
+import { LinkPreview, firstUrl } from "./LinkPreview";
 
 export function Thread({ conv, siblings, labels, members, knowledge }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
   const sb = supabaseBrowser();
@@ -126,7 +127,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.direction === "out" ? "bg-blue-600 text-white rounded-br-sm" : "bg-white rounded-bl-sm")}>
               {m.attachments?.map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
-              {m.text && <div className="whitespace-pre-wrap break-words">{m.text}</div>}
+              {m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
+              {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
             </div>
           </div>

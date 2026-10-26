@@ -32,7 +32,12 @@ async function fetchAttachment(a) {
 /** Gửi 1 tin kèm đính kèm qua Zalo: ảnh/file → sendMessage(attachments); video → sendVideo (cần URL public) */
 async function zaloSend(api, uid, text, attachments) {
   const atts = attachments || [];
-  if (!atts.length) return api.sendMessage(text || "", uid, ThreadType.User);
+  if (!atts.length) {
+    // có link → gửi dạng thẻ link (có ảnh/tiêu đề) như app Zalo
+    const link = (text || "").match(/https?:\/\/[^\s<>"']+/i)?.[0];
+    if (link) { try { return await api.sendLink({ msg: text, link }, uid, ThreadType.User); } catch (e) { console.error("sendLink fail, fallback text:", e.message); } }
+    return api.sendMessage(text || "", uid, ThreadType.User);
+  }
   const videos = atts.filter((a) => a.type === "video"); const others = atts.filter((a) => a.type !== "video");
   if (others.length) {
     const files = []; for (const a of others) files.push(await fetchAttachment(a));
