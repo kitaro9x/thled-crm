@@ -40,6 +40,6 @@ export async function fbExchangePages(userToken: string) {
   return (pages.data || []) as { id: string; name: string; access_token: string; picture?: { data?: { url?: string } } }[];
 }
 export async function fbSubscribePage(pageId: string, pageToken: string) {
-  const r = await fetch(`${GRAPH}/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_deliveries,message_reads,feed&access_token=${pageToken}`, { method: "POST" });
+  const r = await fetch(`${GRAPH}/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_deliveries,message_reads,message_echoes,feed&access_token=${pageToken}`, { method: "POST" });
   return r.json();
 }

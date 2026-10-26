@@ -39,6 +39,12 @@ export async function POST(req: NextRequest) {
         const isEcho = !!m.message?.is_echo;
         const senderId = isEcho ? m.recipient.id : m.sender.id;
         if (!m.message) continue; // bỏ qua delivery/read
+        // echo của tin CRM tự gửi (đã lưu external_msg_id) → bỏ qua; echo từ app FB/Business Suite/auto-reply → ghi nhận là tin đi
+        if (isEcho && m.message.mid) {
+          const { data: dup } = await db.from("crm_messages").select("id").eq("external_msg_id", m.message.mid).maybeSingle();
+          if (dup) continue;
+        }
+        const referral = m.referral || m.message?.referral || m.postback?.referral;
         const profile = !isEcho && pageToken ? await fbGetProfile(pageToken, senderId) : null;
         const atts = (m.message.attachments || []).map((a: any) => ({ type: a.type === "image" ? "image" : a.type === "video" ? "video" : a.type === "audio" ? "audio" : "file", url: a.payload?.url, name: a.payload?.title }));
         await ingestMessage(db, {
@@ -46,6 +52,7 @@ export async function POST(req: NextRequest) {
           senderName: profile?.name, senderAvatar: profile?.profile_pic,
           text: m.message.text, type: atts.length ? atts[0].type : m.message.sticker_id ? "sticker" : "text", attachments: atts,
           externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: m,
+          referral: referral ? { source: referral.source, type: referral.type, ad_id: referral.ad_id, ref: referral.ref, ads_context: referral.ads_context_data } : undefined,
         });
       }
 

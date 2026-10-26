@@ -17,6 +17,7 @@ export interface InboundMessage {
   externalMsgId?: string | null;
   sentAt?: string | null;
   direction?: "in" | "out";           // tin do chính mình gửi từ app Zalo/FB khác cũng đồng bộ về
+  referral?: { source?: string; type?: string; ad_id?: string; ref?: string; ads_context?: any }; // click-to-Messenger từ quảng cáo
   kind?: "inbox" | "comment";
   postId?: string | null;
   raw?: unknown;
@@ -60,6 +61,14 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   }).select("id").single();
   if (error && !/duplicate/i.test(error.message)) throw error;
   if (!msg) return { conversationId: conv.id, duplicate: true };
+
+  // nguồn quảng cáo (click-to-Messenger)
+  if (m.referral?.ad_id || m.referral?.source === "ADS") {
+    const meta = { ...(conv.meta || {}), referral: m.referral, ad_id: m.referral.ad_id, ad_title: m.referral.ads_context?.ad_title };
+    const labels: string[] = Array.from(new Set([...(conv.labels || []), "Quảng cáo"]));
+    await db.from("crm_conversations").update({ meta, labels }).eq("id", conv.id);
+    if (conv.customer_id) await db.from("crm_customers").update({ utm: { source: "facebook_ads", ad_id: m.referral.ad_id, ad_title: m.referral.ads_context?.ad_title } }).eq("id", conv.customer_id).is("utm", null);
+  }
 
   if (direction !== "in") return { conversationId: conv.id, messageId: msg.id };
 
@@ -117,8 +126,13 @@ async function applyLeadSources(
         await db.from("crm_identities").update({ customer_id: personId }).eq("id", a.identity.id);
       }
     } else if (a.phone) {
-      // cập nhật SĐT nếu khách đã có mà thiếu phone
-      await db.from("crm_customers").update({ phone: a.phone }).eq("id", personId).is("phone", null);
+      // khách đã có: thiếu phone → điền; có phone khác → lưu vào custom.phones (SĐT phụ)
+      const { data: cur } = await db.from("crm_customers").select("phone,custom").eq("id", personId).single();
+      if (!cur?.phone) await db.from("crm_customers").update({ phone: a.phone }).eq("id", personId);
+      else if (cur.phone !== a.phone) {
+        const extra: string[] = Array.isArray(cur.custom?.phones) ? cur.custom.phones : [];
+        if (!extra.includes(a.phone)) await db.from("crm_customers").update({ custom: { ...(cur.custom || {}), phones: [...extra, a.phone] } }).eq("id", personId);
+      }
     }
 
     // tạo cơ hội
