@@ -41,11 +41,11 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
   const savePhone = async () => {
     if (!person) return; const v = phone.replace(/[\s.\-]/g, "");
     if (!v || v === person.phone) { setPhone(person.phone || ""); return; }
-    const extra = (Array.isArray(person.custom?.phones) ? person.custom.phones : []).filter((x: string) => x !== v);
+    const extra = (Array.isArray(person.custom?.phones) ? (person.custom.phones as string[]) : []).filter((x: string) => x !== v);
     const custom = { ...(person.custom || {}), phones: person.phone && person.phone !== v ? Array.from(new Set([person.phone, ...extra])) : extra };
     await sb.from("crm_customers").update({ phone: v, custom }).eq("id", person.id); load();
   };
-  const makePrimary = async (v: string) => { if (!person) return; setPhone(v); const extra = (person.custom?.phones || []).filter((x: string) => x !== v); const custom = { ...(person.custom || {}), phones: person.phone ? [person.phone, ...extra] : extra }; await sb.from("crm_customers").update({ phone: v, custom }).eq("id", person.id); load(); };
+  const makePrimary = async (v: string) => { if (!person) return; setPhone(v); const extra = ((person.custom?.phones as string[]) || []).filter((x: string) => x !== v); const custom = { ...(person.custom || {}), phones: person.phone ? [person.phone, ...extra] : extra }; await sb.from("crm_customers").update({ phone: v, custom }).eq("id", person.id); load(); };
   const createLead = async () => {
     if (!person) return;
     const { data: pipe } = await sb.from("crm_pipelines").select("id").eq("is_default", true).single();
@@ -79,7 +79,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
       ) : (
         <div className="p-4 space-y-3 text-sm">
           <Row k="Phone"><div className="flex gap-1"><input className="input py-1" value={phone} onChange={(e) => setPhone(e.target.value)} onBlur={savePhone} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />{person.phone && <a className="btn px-2" href={`tel:${person.phone}`}><Phone size={14} /></a>}</div>
-            {Array.isArray(person.custom?.phones) && person.custom.phones.length > 0 && <div className="flex flex-wrap gap-1 mt-1">{person.custom.phones.map((x: string) => <span key={x} className="chip bg-slate-100 text-slate-700 text-xs">{x} <button className="ml-1 text-blue-600" title="Dùng làm số chính" onClick={() => makePrimary(x)}>↑</button></span>)}</div>}</Row>
+            {Array.isArray(person.custom?.phones) && person.custom.phones.length > 0 && <div className="flex flex-wrap gap-1 mt-1">{(person.custom.phones as string[]).map((x: string) => <span key={x} className="chip bg-slate-100 text-slate-700 text-xs">{x} <button className="ml-1 text-blue-600" title="Dùng làm số chính" onClick={() => makePrimary(x)}>↑</button></span>)}</div>}</Row>
           <Row k="Giới tính"><select className="input py-1" value={person.gender || ""} onChange={async (e) => { await sb.from("crm_customers").update({ gender: e.target.value || null }).eq("id", person.id); load(); }}><option value="">-</option><option>Nam</option><option>Nữ</option></select></Row>
           <Row k="Email">{person.email || "-"}</Row>
           <Row k="Phụ trách"><select className="input py-1" value={person.assigned_to || ""} onChange={async (e) => { await sb.from("crm_customers").update({ assigned_to: e.target.value || null }).eq("id", person.id); load(); }}><option value="">-</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Row>
