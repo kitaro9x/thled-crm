@@ -87,17 +87,22 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   };
   const assign = async (id: string) => { await sb.from("crm_conversations").update({ assigned_to: id }).eq("id", conv.id); setShowAssign(false); };
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashItems.length) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashItems.length); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setSlashIdx((i) => (i - 1 + slashItems.length) % slashItems.length); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickSlash(slashItems[slashIdx]); return; }
+      if (e.key === "Escape") { setText(""); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
   // điền biến {fullname} {gender} {phone} khi chèn trả lời nhanh
   const fill = (t: string) => t.replace(/\{fullname\}/g, conv.person_name || conv.display_name || "anh/chị").replace(/\{gender\}/g, "anh/chị").replace(/\{phone\}/g, conv.person_phone || "");
-  // phím tắt /xxx từ kho tri thức
-  useEffect(() => {
-    const m = text.match(/^\/(\S+)$/); if (!m) return;
-    const k = knowledge.find((x) => x.shortcut === "/" + m[1] || x.shortcut === m[1]);
-    if (k) setText(fill(k.content));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, knowledge]);
+  // gõ "/" ở đầu ô chat → hiện gợi ý trả lời nhanh, lọc theo chữ sau dấu /; Enter/Tab chọn mục đầu
+  const slashMatch = text.match(/^\/(\S*)$/);
+  const slashItems = slashMatch ? knowledge.filter((k) => { const q = slashMatch[1].toLowerCase(); return !q || (k.shortcut || "").toLowerCase().includes(q) || k.title.toLowerCase().includes(q); }).slice(0, 8) : [];
+  const [slashIdx, setSlashIdx] = useState(0);
+  useEffect(() => { setSlashIdx(0); }, [text]);
+  const pickSlash = (k: { content: string }) => { setText(fill(k.content)); };
 
   return (
     <>
@@ -132,6 +137,10 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
         {conv.scheduled_message && <div className="text-xs text-amber-700 mb-1 flex items-center gap-1"><Clock size={12} /> Tin hẹn giờ: “{conv.scheduled_message.text}” lúc {dt(conv.scheduled_message.send_at, "HH:mm dd/MM")}</div>}
         {err && <div className="text-xs text-red-600 mb-1">{err}</div>}
         {multi && <div className="flex items-center gap-1 mb-2 text-xs text-slate-500">Trả lời qua:{all.map((c) => <button key={c.id} onClick={() => setTarget(c)} className={cn("chip border flex items-center gap-1", target.id === c.id ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-200 text-slate-600")}><ChannelIcon type={c.channel_type} size={12} />{c.channel_type === "zalo_personal" ? "Zalo" : c.kind === "comment" ? "FB bình luận" : "Messenger"}</button>)}</div>}
+        {slashItems.length > 0 && <div className="mb-2 card shadow-lg max-h-64 overflow-auto p-1">
+          <div className="px-2 py-1 text-[11px] text-slate-400">Trả lời nhanh — ↑↓ chọn, Enter/Tab chèn, Esc huỷ</div>
+          {slashItems.map((k, i) => <button key={k.id} onMouseDown={(e) => { e.preventDefault(); pickSlash(k); }} className={cn("block w-full text-left px-2 py-1.5 text-sm rounded", i === slashIdx ? "bg-blue-50" : "hover:bg-slate-50")}><b className="text-blue-700">{k.shortcut}</b> {k.title}<div className="text-[11px] text-slate-400 truncate">{k.content}</div></button>)}
+        </div>}
         {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
         <textarea className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onPaste={(e) => { const fs = Array.from(e.clipboardData.files || []); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
