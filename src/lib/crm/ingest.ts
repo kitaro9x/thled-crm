@@ -71,6 +71,14 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
     if (conv.customer_id) await db.from("crm_customers").update({ utm: { source: "facebook_ads", ad_id: m.referral.ad_id, ad_title: m.referral.ads_context?.ad_title } }).eq("id", conv.customer_id).is("utm", null);
   }
 
+  // tự gắn nhãn theo từ khoá (Cài đặt → Nhãn hội thoại)
+  if (m.text) {
+    const { data: kw } = await db.from("crm_labels").select("name,keywords").neq("keywords", "{}");
+    const low = m.text.toLowerCase();
+    const hit = (kw || []).filter((l) => (l.keywords || []).some((k: string) => k && low.includes(k.toLowerCase()))).map((l) => l.name).filter((n) => !(conv.labels || []).includes(n));
+    if (hit.length) { const labels = [...(conv.labels || []), ...hit]; await db.from("crm_conversations").update({ labels }).eq("id", conv.id); conv.labels = labels; }
+  }
+
   if (direction !== "in" || kind === "group") return { conversationId: conv.id, messageId: msg.id }; // nhóm: không bắt SĐT / tạo khách / phân phối
   // người mang nhãn "không tạo cơ hội" (vd Nhà cung cấp, Nhân viên — đồng bộ từ phân loại Zalo) → không bắt SĐT/tạo khách/lead
   const zl: string[] = Array.isArray((identity as any).meta?.zalo_labels) ? (identity as any).meta.zalo_labels : [];
