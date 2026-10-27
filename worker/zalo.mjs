@@ -143,34 +143,46 @@ async function main() {
       const d = m.data; const isSelf = m.isSelf;
       const isGroup = m.type === ThreadType.Group;
       const uid = isGroup ? m.threadId : isSelf ? d.toUid || m.threadId : d.uidFrom || m.threadId;
-      let text = typeof d.content === "string" ? d.content : d.content?.title || d.content?.description || "";
-      // tin do chính CRM/worker vừa gửi → đã có trong crm_messages, chỉ cập nhật trạng thái, không ghi đôi
-      if (isSelf) {
-        const { data: conv } = await sb.from("crm_v_conversations").select("id").eq("channel_type", "zalo_personal").eq("external_id", String(uid)).limit(1).maybeSingle();
-        if (conv) {
-          const since = new Date(Date.now() - 2 * 60000).toISOString();
-          const { data: recent } = await sb.from("crm_messages").select("id,status,text,type,external_msg_id").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).order("created_at", { ascending: false }).limit(10);
-          const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
-          const dup = (recent || []).find((r) => !r.external_msg_id && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
-          if (dup) { await sb.from("crm_messages").update({ status: "sent", external_msg_id: String(d.msgId) }).eq("id", dup.id); return; }
-        }
+      // Diễn giải nội dung theo loại tin của Zalo (giống hiển thị trên app)
+      const c = d.content; const mt = d.msgType || ""; const attachments = []; let type = "text";
+      let text = typeof c === "string" ? c : "";
+      const dur = (ms) => { const s = Math.round(Number(ms || 0) / 1000); return `${Math.floor(s / 60)} phút ${s % 60} giây`; };
+      if (mt === "chat.photo") { type = "image"; attachments.push({ type: "image", url: c?.href || c?.hd || c?.thumb }); text = c?.title || ""; }
+      else if (mt === "chat.gif") { type = "image"; attachments.push({ type: "image", url: c?.href || c?.thumb }); text = ""; }
+      else if (mt === "chat.sticker") { type = "sticker"; text = "[Sticker]"; }
+      else if (mt === "chat.voice") { type = "audio"; attachments.push({ type: "audio", url: c?.href }); text = "🎤 Tin nhắn thoại"; }
+      else if (mt === "chat.video.msg") { type = "video"; attachments.push({ type: "video", url: c?.href, thumb: c?.thumb }); text = c?.title || ""; }
+      else if (mt === "share.file") { type = "file"; attachments.push({ type: "file", url: c?.href, name: c?.title }); text = ""; }
+      else if (mt === "chat.location.new") { text = `📍 Vị trí: ${c?.title || c?.description || ""}`.trim(); }
+      else if (mt === "chat.recommended") { // danh thiếp / liên hệ / link
+        const t = c?.title || c?.description || ""; text = c?.action === "recommened.user" || c?.type === "recommened.user" ? `👤 Danh thiếp: ${t}` : t || "[Thẻ chia sẻ]";
       }
-      let type = "text"; const attachments = [];
-      if (d.msgType === "chat.photo" || d.content?.href?.match(/\.(jpg|png|jpeg|webp)/)) { type = "image"; attachments.push({ type: "image", url: d.content?.href || d.content?.thumb }); text = d.content?.title || ""; }
-      else if (d.msgType === "chat.sticker") { type = "sticker"; text = "[Sticker]"; }
-      else if (d.msgType === "chat.voice") { type = "audio"; attachments.push({ type: "audio", url: d.content?.href }); }
-      else if (d.msgType === "share.file") { type = "file"; attachments.push({ type: "file", url: d.content?.href, name: d.content?.title }); }
+      else if (mt === "chat.link") { text = [c?.title, c?.href].filter(Boolean).join("\n") || "[Link]"; if (c?.thumb) attachments.push({ type: "link", url: c.href, thumb: c.thumb }); }
+      else if (mt === "chat.todo") { text = `☑️ Việc cần làm: ${c?.title || c?.description || ""}`; }
+      else if (mt === "chat.doodle") { type = "image"; attachments.push({ type: "image", url: c?.href }); text = "[Hình vẽ]"; }
+      else if (typeof c === "object" && c) {
+        // bubble đặc biệt (cuộc gọi, poll, nhắc hẹn…): c.title/description, hoặc params JSON
+        let p = null; try { p = typeof c.params === "string" ? JSON.parse(c.params) : c.params; } catch {}
+        const isCall = /call/i.test(mt) || /call/i.test(String(c.action || "")) || p?.callType != null || p?.duration != null || p?.callId != null;
+        if (isCall) {
+          const missed = p?.status === "missed" || p?.missed || (p?.duration === 0);
+          const video = p?.callType === 1 || p?.callType === "video" || /video/i.test(String(c.action || ""));
+          text = `${video ? "📹" : "📞"} ${isSelf ? "Cuộc gọi" + (video ? " video" : " thoại") + " đi" : "Cuộc gọi" + (video ? " video" : " thoại") + " đến"}${missed ? " (nhỡ)" : p?.duration != null ? " · " + dur(p.duration) : ""}`;
+          type = "event";
+        } else text = c.title || c.description || (text && text !== "sendBubbleMessage" ? text : `[${mt || "Tin nhắn đặc biệt"}]`);
+      }
+      if (text === "sendBubbleMessage") text = "📞 Cuộc gọi";
       let senderName = d.dName, avatar, phone;
       if (isGroup) {
         // nhóm: hội thoại = nhóm, tên người gửi ghi vào từng tin
         let gname = groupNames.get(uid);
         if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; groupNames.set(uid, gname); }
-        await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null) });
+        await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c } });
         return;
       }
       // luôn tra hồ sơ của ĐỐI PHƯƠNG (khi mình gửi, d.dName là tên của mình → không dùng)
       { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || (isSelf ? undefined : senderName); avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
-      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in" });
+      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c } });
     } catch (e) { console.error("msg err", e.message); }
   });
   api.listener.start();
