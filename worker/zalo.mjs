@@ -95,6 +95,19 @@ async function main() {
   await sb.from("crm_channels").upsert({ type: "zalo_personal", external_id: String(own), name, status: "connected" }, { onConflict: "type,external_id" });
   console.log("Online:", name, own);
 
+  // sửa các hội thoại bị gán nhầm tên tài khoản của mình (lỗi cũ khi mình nhắn trước)
+  try {
+    const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").eq("external_id", String(own)).single();
+    const { data: bad } = await sb.from("crm_identities").select("id,external_id,customer_id").eq("channel_id", ch.id).eq("display_name", name).neq("external_id", String(own));
+    for (const b of bad || []) {
+      const info = await api.getUserInfo(b.external_id).catch(() => null); const p = info?.changed_profiles?.[b.external_id];
+      const real = p?.zaloName || p?.displayName; if (!real) continue;
+      await sb.from("crm_identities").update({ display_name: real, avatar_url: p.avatar || null }).eq("id", b.id);
+      if (b.customer_id) await sb.from("crm_customers").update({ name: real, zalo: real }).eq("id", b.customer_id).eq("name", name);
+      console.log("Sửa tên:", b.external_id, "→", real); await sleep(500);
+    }
+  } catch (e) { console.error("repair names err", e.message); }
+
   // 2. listener
   const groupNames = new Map();
   api.listener.on("message", async (m) => {
@@ -127,7 +140,8 @@ async function main() {
         await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null) });
         return;
       }
-      if (!isSelf) { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || senderName; avatar = p.avatar; phone = p.phoneNumber; } }
+      // luôn tra hồ sơ của ĐỐI PHƯƠNG (khi mình gửi, d.dName là tên của mình → không dùng)
+      { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || (isSelf ? undefined : senderName); avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
       await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in" });
     } catch (e) { console.error("msg err", e.message); }
   });
