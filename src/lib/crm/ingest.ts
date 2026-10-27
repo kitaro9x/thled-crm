@@ -18,7 +18,8 @@ export interface InboundMessage {
   sentAt?: string | null;
   direction?: "in" | "out";           // tin do chính mình gửi từ app Zalo/FB khác cũng đồng bộ về
   referral?: { source?: string; type?: string; ad_id?: string; ref?: string; ads_context?: any }; // click-to-Messenger từ quảng cáo
-  kind?: "inbox" | "comment";
+  kind?: "inbox" | "comment" | "group";
+  messageSenderName?: string | null; // tên người gửi trong nhóm
   postId?: string | null;
   raw?: unknown;
 }
@@ -56,7 +57,7 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   // 3. message (idempotent theo external_msg_id)
   const direction = m.direction || "in";
   const { data: msg, error } = await db.from("crm_messages").insert({
-    conversation_id: conv.id, direction, type: m.type || "text", text: m.text ?? null, attachments: m.attachments || [],
+    conversation_id: conv.id, direction, type: m.type || "text", text: m.text ?? null, attachments: m.attachments || [], sender_name: m.messageSenderName ?? null,
     external_msg_id: m.externalMsgId ?? null, sent_at: m.sentAt || new Date().toISOString(), raw: m.raw ?? null, status: "sent",
   }).select("id").single();
   if (error && !/duplicate/i.test(error.message)) throw error;
@@ -70,7 +71,7 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
     if (conv.customer_id) await db.from("crm_customers").update({ utm: { source: "facebook_ads", ad_id: m.referral.ad_id, ad_title: m.referral.ads_context?.ad_title } }).eq("id", conv.customer_id).is("utm", null);
   }
 
-  if (direction !== "in") return { conversationId: conv.id, messageId: msg.id };
+  if (direction !== "in" || kind === "group") return { conversationId: conv.id, messageId: msg.id }; // nhóm: không bắt SĐT / tạo khách / phân phối
 
   // 4. Nguồn khách hàng → person + lead
   const phone = normalizePhone(m.senderPhone) || extractPhone(m.text) || identity.phone;
