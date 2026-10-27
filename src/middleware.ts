@@ -11,9 +11,9 @@ export async function middleware(req: NextRequest) {
   });
   const { data: { user } } = await sb.auth.getUser();
   const p = req.nextUrl.pathname;
-  const isPublic = p.startsWith("/login") || p === "/privacy" || p === "/data-deletion" || p.startsWith("/api/webhooks") || p.startsWith("/api/cron") || p.startsWith("/api/internal") || p.startsWith("/_next") || p === "/favicon.ico";
+  const isPublic = p.startsWith("/login") || p === "/privacy" || p === "/data-deletion" || p.startsWith("/api/webhooks") || p.startsWith("/api/cron") || p.startsWith("/api/internal") || p.startsWith("/_next") || p === "/favicon.ico" || p === "/manifest.json" || p === "/sw.js" || p.startsWith("/icons/");
   if (!user && !isPublic) return NextResponse.redirect(new URL("/login", req.url));
   if (user && p === "/login") return NextResponse.redirect(new URL("/inbox", req.url));
   return res;
 }
-export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|svg)).*)"] };
+export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|icons/|.*\\.(?:png|jpg|svg|json|js)).*)"] };
