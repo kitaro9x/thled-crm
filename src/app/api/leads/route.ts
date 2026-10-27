@@ -39,6 +39,12 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json();
   const db = supabaseAdmin();
+  // chống tạo trùng: khách đã có cơ hội mở trong cùng phễu → trả về cơ hội đó (trừ khi force=true)
+  if (body.person_id && body.pipeline_id && !body.force) {
+    const { data: open } = await db.from("crm_leads").select("id").eq("person_id", body.person_id).eq("pipeline_id", body.pipeline_id).eq("status", "open").limit(1);
+    if (open?.length) return NextResponse.json({ ok: true, id: open[0].id, existing: true });
+  }
+  delete body.force;
   const { data, error } = await db.from("crm_leads").insert({ ...body, source_origin: "manual", created_by: user.id, assigned_to: body.assigned_to || user.id }).select("id").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await runAutomation(db, data.id, ["created_in_pipeline", "created_or_moved_to_stage"]);

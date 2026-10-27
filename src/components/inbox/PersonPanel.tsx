@@ -46,11 +46,13 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
     await sb.from("crm_customers").update({ phone: v, custom }).eq("id", person.id); load();
   };
   const makePrimary = async (v: string) => { if (!person) return; setPhone(v); const extra = ((person.custom?.phones as string[]) || []).filter((x: string) => x !== v); const custom = { ...(person.custom || {}), phones: person.phone ? [person.phone, ...extra] : extra }; await sb.from("crm_customers").update({ phone: v, custom }).eq("id", person.id); load(); };
+  const [leadBusy, setLeadBusy] = useState(false); const [leadMsg, setLeadMsg] = useState("");
   const createLead = async () => {
-    if (!person) return;
+    if (!person || leadBusy) return; setLeadBusy(true); setLeadMsg("");
     const { data: pipe } = await sb.from("crm_pipelines").select("id").eq("is_default", true).single();
     const { data: stage } = await sb.from("crm_stages").select("id").eq("pipeline_id", pipe!.id).eq("kind", "open").order("sort_order").limit(1).single();
-    await fetch("/api/leads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: person.name, person_id: person.id, pipeline_id: pipe!.id, stage_id: stage!.id, source_conversation_id: conv.id, source_channel_id: conv.channel_id }) });
+    const r = await fetch("/api/leads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: person.name, person_id: person.id, pipeline_id: pipe!.id, stage_id: stage!.id, source_conversation_id: conv.id, source_channel_id: conv.channel_id }) });
+    const j = await r.json(); if (j.existing) setLeadMsg("Khách đã có cơ hội đang mở — không tạo thêm."); setLeadBusy(false);
     load();
   };
   const requestZaloFriend = async () => {
@@ -93,7 +95,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
           </div>
 
           <div className="pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-1"><b>Cơ hội ({leads.filter((l) => l.status === "open").length} mở)</b><button className="btn px-2 py-0.5" onClick={createLead}><Plus size={12} /></button></div>
+            <div className="flex items-center justify-between mb-1"><b>Cơ hội ({leads.filter((l) => l.status === "open").length} mở)</b><button className="btn px-2 py-0.5" onClick={createLead} disabled={leadBusy}><Plus size={12} /></button></div>{leadMsg && <div className="text-xs text-amber-700 mb-1">{leadMsg}</div>}
             {leads.map((l) => <Link key={l.id} href={`/leads?lead=${l.id}`} className="block rounded border border-slate-100 p-2 mb-1 hover:bg-slate-50"><div className="font-medium truncate">{l.title}</div><div className="text-xs text-slate-500"><span className="chip text-white" style={{ background: l.stage_color }}>{l.stage_name}</span> · {dt(l.created_at, "dd/MM")}</div></Link>)}
           </div>
 
