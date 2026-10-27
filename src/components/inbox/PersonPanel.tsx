@@ -64,7 +64,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
   };
 
   return (
-    <div className="w-[320px] shrink-0 border-l border-slate-200 bg-white overflow-y-auto">
+    <div className="w-full md:w-[320px] shrink-0 md:border-l border-slate-200 bg-white overflow-y-auto flex-1 md:flex-none">
       <div className="p-4 border-b border-slate-100 flex items-center gap-3">
         <Avatar src={person?.avatar_url || conv.identity_avatar} name={person?.name || conv.display_name} size={44} />
         <div className="min-w-0"><div className="font-semibold truncate">{person?.name || conv.display_name}</div>{person && <Link href={`/cdp/${person.id}`} className="text-xs text-blue-600">Xem khách hàng</Link>}</div>

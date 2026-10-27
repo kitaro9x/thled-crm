@@ -33,8 +33,8 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
     );
   }
   return (
-    <div className="h-screen flex">
-      <aside className="w-[72px] shrink-0 bg-slate-900 text-slate-300 flex flex-col items-center py-3 gap-1">
+    <div className="h-[100dvh] flex flex-col md:flex-row">
+      <aside className="hidden md:flex w-[72px] shrink-0 bg-slate-900 text-slate-300 flex-col items-center py-3 gap-1">
         <Link href="/inbox" className="mb-2 text-white font-black text-lg">TH</Link>
         {nav.map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={20} />} />)}
         <div className="mt-auto text-[10px] text-center px-1 leading-tight">
@@ -42,7 +42,12 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
           <div className="truncate">{me.name}</div>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 overflow-hidden">{children}</main>
+      <main className="flex-1 min-w-0 min-h-0 overflow-hidden">{children}</main>
+      {/* thanh điều hướng đáy cho điện thoại */}
+      <nav className="md:hidden shrink-0 bg-slate-900 text-slate-300 flex justify-around border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
+        {nav.slice(0, 5).map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={18} />} compact />)}
+        <NavLink href="/settings" label="Thêm" icon={<Settings size={18} />} compact />
+      </nav>
       <Presence />
     </div>
   );

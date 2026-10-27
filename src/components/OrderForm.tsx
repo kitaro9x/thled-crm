@@ -23,7 +23,7 @@ export function OrderForm({ lead, person, members }: { lead: any; person: any; m
   return (
     <div className="h-full overflow-auto p-4"><div className="card p-4 max-w-4xl mx-auto space-y-4 text-sm">
       <div className="flex items-center"><b className="text-base">Tạo đơn hàng / báo giá</b>{lead && <span className="chip bg-blue-50 text-blue-700 ml-2">từ cơ hội: {lead.title}</span>}</div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card p-3"><b>Contact Info</b><div className="mt-1">{person ? <>{person.name}<br />{person.phone}<br />{person.address}</> : <span className="text-slate-400">Chưa chọn khách (tạo từ Cơ hội hoặc CDP để tự điền)</span>}</div></div>
         <div className="card p-3 space-y-1"><b>Order Info</b><select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>{["new", "confirmed", "delivering", "done", "cancelled"].map((s) => <option key={s}>{s}</option>)}</select><select className="input" value={saler} onChange={(e) => setSaler(e.target.value)}><option value="">Sale phụ trách</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
         <div className="card p-3"><b>Ghi chú</b><textarea className="input mt-1" rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></div>

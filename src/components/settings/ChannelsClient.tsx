@@ -23,7 +23,7 @@ export function ChannelsClient({ channels, worker, appId }: { channels: Channel[
   const askZalo = async () => { await sb.from("crm_zalo_worker").update({ state: "need_qr", qr_image: null }).eq("id", 1); };
   return <div className="text-sm space-y-4">
     <div className="card p-4"><b className="text-base">Kết nối kênh</b><p className="text-xs text-slate-500">Fanpage qua Meta API chính thức. Zalo cá nhân qua worker riêng (quét QR), chạy trên VPS/máy tính của bạn.</p>
-      <div className="grid grid-cols-3 gap-3 mt-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
         <div className="card p-3"><div className="flex items-center gap-2 font-semibold"><ChannelIcon type="fb_page" size={22} /> Facebook Fanpage</div><div className="text-xs text-slate-500 my-2">text · photo · inbox · comment · bot bình luận</div><div className="flex gap-2 items-center"><button className="btn btn-primary" onClick={connectFb} disabled={busy}>{busy ? "Đang chuyển sang Facebook…" : "Kết nối"}</button><button className="text-xs text-slate-500 underline" onClick={() => setShowToken(!showToken)}>Dùng token</button></div>
           {showToken && <div className="mt-2 space-y-1"><div className="text-xs text-slate-500">Dự phòng: dán User Access Token lấy từ Graph API Explorer (đã cấp quyền pages_show_list, pages_messaging, pages_manage_metadata).</div><div className="flex gap-2"><input className="input flex-1 text-xs" placeholder="EAAB…" value={token} onChange={(e) => setToken(e.target.value)} /><button className="btn" onClick={connectByToken} disabled={busy}>Kết nối bằng token</button></div></div>}
           {!appId && <div className="text-xs text-red-600 mt-1">Chưa cấu hình FB_APP_ID trên server.</div>}</div>
