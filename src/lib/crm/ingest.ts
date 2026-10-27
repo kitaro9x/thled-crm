@@ -39,7 +39,7 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
       { channel_id: channel.id, channel: m.channelType, external_id: m.senderExternalId, display_name: m.senderName ?? undefined, avatar_url: m.senderAvatar ?? undefined, phone: normalizePhone(m.senderPhone) ?? undefined },
       { onConflict: "channel_id,external_id", ignoreDuplicates: false }
     )
-    .select("id,customer_id,display_name,avatar_url,phone").single();
+    .select("id,customer_id,display_name,avatar_url,phone,meta").single();
   if (!identity) throw new Error("identity upsert failed: " + (idErr?.message || "unknown"));
 
   // 2. conversation (1 identity = 1 inbox conversation; comment = theo post)
@@ -72,6 +72,13 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   }
 
   if (direction !== "in" || kind === "group") return { conversationId: conv.id, messageId: msg.id }; // nhóm: không bắt SĐT / tạo khách / phân phối
+  // người mang nhãn "không tạo cơ hội" (vd Nhà cung cấp, Nhân viên — đồng bộ từ phân loại Zalo) → không bắt SĐT/tạo khách/lead
+  const zl: string[] = Array.isArray((identity as any).meta?.zalo_labels) ? (identity as any).meta.zalo_labels : [];
+  const allLabels = Array.from(new Set([...zl, ...(conv.labels || [])]));
+  if (allLabels.length) {
+    const { data: skip } = await db.from("crm_labels").select("name").in("name", allLabels).eq("skip_lead", true).limit(1);
+    if (skip?.length) return { conversationId: conv.id, messageId: msg.id, skipped: skip[0].name };
+  }
 
   // 4. Nguồn khách hàng → person + lead
   const phone = normalizePhone(m.senderPhone) || extractPhone(m.text) || identity.phone;

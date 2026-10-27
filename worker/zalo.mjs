@@ -108,6 +108,34 @@ async function main() {
     }
   } catch (e) { console.error("repair names err", e.message); }
 
+  // Đồng bộ "Phân loại" trên Zalo → nhãn hội thoại CRM (tự tạo nhãn, gắn vào hội thoại, lưu vào identity.meta.zalo_labels)
+  async function syncLabels() {
+    try {
+      const res = await api.getLabels(); const labels = res?.labelData || [];
+      const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").eq("external_id", String(own)).single();
+      const byUid = new Map(); const names = [];
+      for (const l of labels) {
+        const nm = (l.text || "").trim(); if (!nm) continue; names.push(nm);
+        await sb.from("crm_labels").upsert({ name: nm, color: l.color || "#64748b", zalo_label_id: l.id, source: "zalo" }, { onConflict: "name" });
+        for (const uid of l.conversations || []) { const k = String(uid); byUid.set(k, [...(byUid.get(k) || []), nm]); }
+      }
+      const { data: ids } = await sb.from("crm_identities").select("id,external_id,meta").eq("channel_id", ch.id);
+      for (const i of ids || []) {
+        const cur = Array.isArray(i.meta?.zalo_labels) ? i.meta.zalo_labels : [];
+        const next = byUid.get(String(i.external_id)) || [];
+        if (JSON.stringify(cur) === JSON.stringify(next)) continue;
+        await sb.from("crm_identities").update({ meta: { ...(i.meta || {}), zalo_labels: next } }).eq("id", i.id);
+        const { data: convs } = await sb.from("crm_conversations").select("id,labels").eq("identity_id", i.id);
+        for (const c of convs || []) {
+          const keep = (c.labels || []).filter((x) => !names.includes(x) && !cur.includes(x));
+          await sb.from("crm_conversations").update({ labels: Array.from(new Set([...keep, ...next])) }).eq("id", c.id);
+        }
+      }
+      console.log("Đồng bộ phân loại Zalo:", names.join(", ") || "(không có)");
+    } catch (e) { console.error("syncLabels err", e.message); }
+  }
+  await syncLabels(); setInterval(syncLabels, 10 * 60000);
+
   // 2. listener
   const groupNames = new Map();
   api.listener.on("message", async (m) => {
