@@ -26,6 +26,15 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [files, setFiles] = useState<{ file: File; preview: string }[]>([]);
   const [showQuick, setShowQuick] = useState(false); const [quickQ, setQuickQ] = useState("");
   const quickRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLDivElement>(null);
+  // đóng bảng nhãn / giao việc khi bấm ra ngoài hoặc Esc
+  useEffect(() => {
+    if (!showLabels && !showAssign) return;
+    const onDown = (e: MouseEvent) => { if (headRef.current && !headRef.current.contains(e.target as Node)) { setShowLabels(false); setShowAssign(false); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setShowLabels(false); setShowAssign(false); } };
+    document.addEventListener("mousedown", onDown); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [showLabels, showAssign]);
   // đóng bảng trả lời nhanh khi bấm ra ngoài hoặc Esc
   useEffect(() => {
     if (!showQuick) return;
@@ -137,12 +146,12 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       <div className="h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
         <div className="flex -space-x-1">{Array.from(new Set(all.map((c) => c.channel_type))).map((t) => <ChannelIcon key={t} type={t} size={22} />)}</div>
         <div className="min-w-0"><div className="font-semibold truncate">{conv.person_name || conv.display_name}</div><div className="text-xs text-slate-500">{multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
-        <div className="ml-auto flex items-center gap-1 relative md:mr-10">
+        <div ref={headRef} className="ml-auto flex items-center gap-1 relative md:mr-10">
           <button className="btn px-2" title="Quan trọng" onClick={() => sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id)}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} /></button>
           <button className="btn px-2" title="Gắn nhãn" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); }}><Tag size={15} /></button>
           <button className="btn px-2" title="Giao cho" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); }}><UserPlus size={15} /></button>
           <button className="btn px-2" title={conv.status === "open" ? "Đóng hội thoại" : "Mở lại"} onClick={() => sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id)}><Check size={15} /></button>
-          {showLabels && <div className="absolute right-0 top-10 z-10 card p-2 w-56 max-h-72 overflow-auto shadow-lg">{labels.map((l) => <label key={l.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer"><input type="checkbox" checked={convLabels.includes(l.name)} onChange={() => toggleLabel(l.name)} /><span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />{l.name}</label>)}</div>}
+          {showLabels && <div className="absolute right-0 top-10 z-10 card p-2 w-56 max-h-72 overflow-auto shadow-lg"><div className="flex items-center justify-between text-xs text-slate-500 mb-1"><span>Gắn nhãn</span><button onClick={() => setShowLabels(false)} className="btn px-1.5 py-0.5"><X size={12} /></button></div>{labels.map((l) => <label key={l.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer"><input type="checkbox" checked={convLabels.includes(l.name)} onChange={() => toggleLabel(l.name)} /><span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />{l.name}</label>)}</div>}
           {showAssign && <div className="absolute right-0 top-10 z-10 card p-2 w-56 shadow-lg">{members.map((m) => <button key={m.id} onClick={() => assign(m.id)} className="block w-full text-left py-1.5 px-2 rounded hover:bg-slate-50 text-sm">{m.name}</button>)}</div>}
         </div>
       </div>
