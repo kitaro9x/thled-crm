@@ -52,3 +52,10 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 4. Reset App Secret trên Meta (đã lộ qua chat) → cập nhật `FB_APP_SECRET` Vercel → Redeploy. Cân nhắc xoay service_role key (ảnh hưởng web thled.vn, làm lúc rảnh).
 5. Đổi mật khẩu admin tạm; đổi tên 2 tài khoản "THLED Admin" trong Nhân sự.
 6. Blacklist SĐT: hiện có hotline 0966931056 (Cài đặt → Số điện thoại); thêm số chi nhánh/nhân viên khác để không tạo khách giả.
+
+## 6. Thông báo đẩy (Web Push) — thêm 28/10/2026
+- Mỗi nhân sự tự bật trên từng thiết bị: mở CRM → nút **🔔 Thông báo** (sidebar máy tính / thanh dưới điện thoại) → Cho phép. Bật xong CRM gửi 1 thông báo thử.
+- iPhone/iPad: phải **Thêm vào Màn hình chính** (Safari → Chia sẻ) và mở từ icon đó mới có thông báo (iOS 16.4+). Android/Chrome/Edge máy tính: bật trực tiếp.
+- Ai nhận: mọi nhân sự đang hoạt động đã bật; hội thoại có nhãn *Chỉ Admin thấy* → chỉ admin. Tắt toàn hệ thống: `crm_settings.notifications.push_enabled=false`; chỉ báo người được giao: `only_assigned=true`.
+- Khoá VAPID trong `crm_secrets` (service role). Thiết bị hết hạn (410/404) tự xoá khỏi `crm_push_subscriptions`.
+- Bấm thông báo → mở `/inbox?c=<id>` đúng hội thoại.
