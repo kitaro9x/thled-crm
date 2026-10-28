@@ -172,6 +172,17 @@ async function main() {
         } else text = c.title || c.description || (text && text !== "sendBubbleMessage" ? text : `[${mt || "Tin nhắn đặc biệt"}]`);
       }
       if (text === "sendBubbleMessage") text = "📞 Cuộc gọi";
+      // tin do chính CRM/worker vừa gửi → đã có trong crm_messages, chỉ cập nhật trạng thái, không ghi đôi
+      if (isSelf) {
+        const { data: conv } = await sb.from("crm_v_conversations").select("id").eq("channel_type", "zalo_personal").eq("external_id", String(uid)).limit(1).maybeSingle();
+        if (conv) {
+          const since = new Date(Date.now() - 2 * 60000).toISOString();
+          const { data: recent } = await sb.from("crm_messages").select("id,status,text,type,external_msg_id").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).order("created_at", { ascending: false }).limit(10);
+          const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
+          const dup = (recent || []).find((r) => !r.external_msg_id && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
+          if (dup) { await sb.from("crm_messages").update({ status: "sent", external_msg_id: String(d.msgId) }).eq("id", dup.id); return; }
+        }
+      }
       let senderName = d.dName, avatar, phone;
       if (isGroup) {
         // nhóm: hội thoại = nhóm, tên người gửi ghi vào từng tin
