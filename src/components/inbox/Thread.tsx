@@ -111,7 +111,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       <div className="h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
         <div className="flex -space-x-1">{Array.from(new Set(all.map((c) => c.channel_type))).map((t) => <ChannelIcon key={t} type={t} size={22} />)}</div>
         <div className="min-w-0"><div className="font-semibold truncate">{conv.person_name || conv.display_name}</div><div className="text-xs text-slate-500">{multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
-        <div className="ml-auto flex items-center gap-1 relative">
+        <div className="ml-auto flex items-center gap-1 relative md:mr-10">
           <button className="btn px-2" title="Quan trọng" onClick={() => sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id)}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} /></button>
           <button className="btn px-2" title="Gắn nhãn" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); }}><Tag size={15} /></button>
           <button className="btn px-2" title="Giao cho" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); }}><UserPlus size={15} /></button>

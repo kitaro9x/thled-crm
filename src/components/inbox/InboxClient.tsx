@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Search, Filter, Users, ArrowLeft, UserRound } from "lucide-react";
+import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -24,6 +24,9 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string }>({});
   const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
   const [mobileView, setMobileView] = useState<"list" | "thread" | "panel">("list"); // điện thoại: từng màn
+  const [showPanel, setShowPanel] = useState(true); // máy tính: ẩn/hiện cột hồ sơ khách
+  useEffect(() => { try { const v = localStorage.getItem("inbox_panel"); if (v !== null) setShowPanel(v === "1"); } catch {} }, []);
+  const togglePanel = () => { setShowPanel((v) => { try { localStorage.setItem("inbox_panel", v ? "0" : "1"); } catch {} return !v; }); };
   const [autoCreate, setAutoCreate] = useState<boolean | null>(null); // công tắc tự tạo khách/cơ hội (nguồn khách hàng)
   useEffect(() => { supabaseBrowser().from("crm_lead_sources").select("is_active").eq("type", "conversation").then(({ data }) => setAutoCreate(!!data?.some((x) => x.is_active))); }, []);
   const toggleAuto = async () => { const n = !autoCreate; setAutoCreate(n); await supabaseBrowser().from("crm_lead_sources").update({ is_active: n }).eq("type", "conversation"); };
@@ -109,10 +112,13 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       {/* cột 2: thread */}
       <div className={cn("flex-1 min-w-0 min-h-0 flex-col bg-[#eef1f6]", mobileView === "thread" ? "flex" : "hidden md:flex")}>
         {current && <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("list")}><ArrowLeft size={16} /></button><div className="font-semibold truncate flex-1">{current.person_name || current.display_name}</div><button className="btn px-2" onClick={() => setMobileView("panel")}><UserRound size={16} /></button></div>}
-        {current ? <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} /> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
+        {current ? <div className="relative flex-1 min-h-0 flex flex-col">
+          <button className="hidden md:flex absolute top-3 right-3 z-10 btn px-2" title={showPanel ? "Ẩn hồ sơ khách (chat rộng hơn)" : "Hiện hồ sơ khách"} onClick={togglePanel}>{showPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button>
+          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} />
+        </div> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
       </div>
       {/* cột 3: panel khách */}
-      {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : "hidden md:flex")}>
+      {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : showPanel ? "hidden md:flex" : "hidden")}>
         <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("thread")}><ArrowLeft size={16} /></button><div className="font-semibold">Hồ sơ khách</div></div>
         <PersonPanel key={"p" + current.id} conv={current} members={members} />
       </div>}
