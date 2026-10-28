@@ -64,6 +64,31 @@ async function ingest(payload) {
   if (!r.ok) console.error("ingest fail", await r.text());
 }
 
+/** Bóc nội dung thẻ "zinstant" của Zalo (thẻ ngân hàng, thẻ thông tin…): tải template, gom chữ + ảnh (QR) */
+async function parseZinstant(c) {
+  try {
+    const p = typeof c.params === "string" ? JSON.parse(c.params) : c.params;
+    const label = p?.customMsg?.msg?.vi || p?.customMsg?.msg?.en || "";
+    const url = p?.item?.data_url || p?.pcItem?.data_url; if (!url) return { text: label, images: [] };
+    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } }); const body = await r.text();
+    let data; try { data = JSON.parse(body); } catch { data = null; }
+    const texts = [], images = [];
+    const seen = new Set();
+    const push = (t) => { const v = String(t).replace(/\s+/g, " ").trim(); if (v && v.length < 200 && !/^https?:/.test(v) && /[\p{L}\d]/u.test(v) && !seen.has(v)) { seen.add(v); texts.push(v); } };
+    const walk = (o) => {
+      if (!o) return;
+      if (Array.isArray(o)) return o.forEach(walk);
+      if (typeof o === "object") { for (const [k, v] of Object.entries(o)) { if (typeof v === "string" && /^https?:\/\/.+\.(png|jpe?g|webp)(\?.*)?$/i.test(v) || (typeof v === "string" && /qr/i.test(k) && /^https?:/.test(v))) images.push(v); else if (typeof v === "string" && /^(text|title|content|value|label|desc|description|subtitle)$/i.test(k)) push(v); else walk(v); } }
+    };
+    if (data) walk(data); else {
+      // HTML: gom chữ trong thẻ và ảnh
+      for (const m of body.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) images.push(m[1]);
+      for (const m of body.matchAll(/>([^<>{}]{2,120})</g)) push(m[1]);
+    }
+    return { text: texts.length ? texts.join("\n") : label, images: Array.from(new Set(images)).slice(0, 2) };
+  } catch (e) { return { text: "", images: [] }; }
+}
+
 /** Ghi tin do worker gửi (lời chào sau kết bạn…) vào CRM để hội thoại Zalo xuất hiện và gộp với khách */
 async function recordOutgoing(own, uid, name, text) {
   await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: name, text, type: "text", attachments: [], externalMsgId: `worker-${uid}-${Date.now()}`, sentAt: new Date().toISOString(), direction: "out" });
@@ -160,6 +185,13 @@ async function main() {
       else if (mt === "chat.link") { text = [c?.title, c?.href].filter(Boolean).join("\n") || "[Link]"; if (c?.thumb) attachments.push({ type: "link", url: c.href, thumb: c.thumb }); }
       else if (mt === "chat.todo") { text = `☑️ Việc cần làm: ${c?.title || c?.description || ""}`; }
       else if (mt === "chat.doodle") { type = "image"; attachments.push({ type: "image", url: c?.href }); text = "[Hình vẽ]"; }
+      else if (mt === "chat.webcontent" || String(c?.action || "").startsWith("zinstant")) {
+        const z = await parseZinstant(c || {});
+        const isBank = /bank/i.test(String(c?.action || "")) || /ngân hàng|bank/i.test(z.text);
+        text = (isBank ? "🏦 Tài khoản ngân hàng" : "🗂️ Thẻ thông tin") + (z.text ? "\n" + z.text : "");
+        for (const u of z.images) attachments.push({ type: "image", url: u });
+        if (attachments.length) type = "image";
+      }
       else if (typeof c === "object" && c) {
         // bubble đặc biệt (cuộc gọi, poll, nhắc hẹn…): c.title/description, hoặc params JSON
         let p = null; try { p = typeof c.params === "string" ? JSON.parse(c.params) : c.params; } catch {}
