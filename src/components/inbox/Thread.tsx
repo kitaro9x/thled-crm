@@ -25,6 +25,22 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [err, setErr] = useState<string | null>(null);
   const [files, setFiles] = useState<{ file: File; preview: string }[]>([]);
   const [showQuick, setShowQuick] = useState(false); const [quickQ, setQuickQ] = useState("");
+  const quickRef = useRef<HTMLDivElement>(null);
+  // đóng bảng trả lời nhanh khi bấm ra ngoài hoặc Esc
+  useEffect(() => {
+    if (!showQuick) return;
+    const onDown = (e: MouseEvent) => { if (quickRef.current && !quickRef.current.contains(e.target as Node)) setShowQuick(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowQuick(false); };
+    document.addEventListener("mousedown", onDown); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [showQuick]);
+  // tìm không dấu, không cần gõ "/": khớp tiêu đề/phím tắt, hoặc từ bắt đầu bằng từ khoá trong nội dung
+  const norm = (t: string) => (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+  const matchQuick = (k: { title: string; shortcut?: string | null; content: string }, q: string) => {
+    const nq = norm(q).replace(/^\//, "").trim(); if (!nq) return true;
+    if (norm(k.title).includes(nq) || norm(k.shortcut || "").replace(/^\//, "").includes(nq)) return true;
+    return new RegExp("(^|[^a-z0-9])" + nq.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(norm(k.content));
+  };
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -101,7 +117,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const fill = (t: string) => t.replace(/\{fullname\}/g, conv.person_name || conv.display_name || "anh/chị").replace(/\{gender\}/g, "anh/chị").replace(/\{phone\}/g, conv.person_phone || "");
   // gõ "/" ở đầu ô chat → hiện gợi ý trả lời nhanh, lọc theo chữ sau dấu /; Enter/Tab chọn mục đầu
   const slashMatch = text.match(/^\/(\S*)$/);
-  const slashItems = slashMatch ? knowledge.filter((k) => { const q = slashMatch[1].toLowerCase(); return !q || (k.shortcut || "").toLowerCase().includes(q) || k.title.toLowerCase().includes(q); }).slice(0, 8) : [];
+  const slashItems = slashMatch ? knowledge.filter((k) => matchQuick(k, slashMatch[1])).slice(0, 8) : [];
   const [slashIdx, setSlashIdx] = useState(0);
   useEffect(() => { setSlashIdx(0); }, [text]);
   const pickSlash = (k: { content: string }) => { setText(fill(k.content)); };
@@ -151,12 +167,12 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }} onDragOver={(e) => e.preventDefault()} />
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
         <div className="flex items-center gap-2 mt-2">
-          <div className="relative"><button className={cn("btn px-2", showQuick && "bg-blue-50 border-blue-300")} title="Trả lời nhanh" onClick={() => setShowQuick((v) => !v)}><Zap size={14} /></button>
+          <div className="relative" ref={quickRef}><button className={cn("btn px-2", showQuick && "bg-blue-50 border-blue-300")} title="Trả lời nhanh" onClick={() => setShowQuick((v) => !v)}><Zap size={14} /></button>
             {showQuick && <div className="absolute bottom-9 left-0 z-20 card w-80 shadow-lg p-1">
-              <input autoFocus className="input mb-1" placeholder="Tìm trả lời nhanh… (hoặc gõ /phím_tắt trong ô chat)" value={quickQ} onChange={(e) => setQuickQ(e.target.value)} />
+              <input autoFocus className="input mb-1" placeholder="Gõ từ khoá: quạt, đèn thả, chào, showroom…" value={quickQ} onChange={(e) => setQuickQ(e.target.value)} />
               <div className="max-h-64 overflow-auto">
                 {knowledge.length === 0 && <div className="p-2 text-xs text-slate-400">Chưa có nội dung trong Kho tri thức</div>}
-                {knowledge.filter((k) => !quickQ || (k.title + " " + (k.shortcut || "") + " " + k.content).toLowerCase().includes(quickQ.toLowerCase())).map((k) => (
+                {knowledge.filter((k) => matchQuick(k, quickQ)).map((k) => (
                   <button key={k.id} onClick={() => { setText(fill(k.content)); setShowQuick(false); setQuickQ(""); }} className="block w-full text-left px-2 py-1.5 text-sm hover:bg-slate-50 rounded">
                     <div><b className="text-blue-700">{k.shortcut}</b> {k.title}</div><div className="text-[11px] text-slate-400 truncate">{k.content}</div>
                   </button>))}
