@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -44,6 +44,10 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = useState(true); const [unseen, setUnseen] = useState(0);
+  const onScroll = () => { const el = scroller.current; if (!el) return; const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(near); if (near) setUnseen(0); };
+  const scrollToBottom = () => { bottom.current?.scrollIntoView({ behavior: "smooth" }); setUnseen(0); };
   const addFiles = (list: FileList | File[]) => {
     const ok = Array.from(list).filter((f) => /^(image\/(jpeg|png|webp|gif)|video\/(mp4|quicktime)|application\/pdf)$/.test(f.type) && f.size <= 25 * 1024 * 1024);
     if (ok.length < Array.from(list).length) setErr("Chỉ nhận ảnh jpg/png/webp/gif, video mp4/mov, PDF — tối đa 25 MB");
@@ -84,7 +88,13 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     return () => { sb.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv.id]);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs.length]);
+  const prevLen = useRef(0);
+  useEffect(() => {
+    const grew = msgs.length > prevLen.current; prevLen.current = msgs.length;
+    if (atBottom || !grew) bottom.current?.scrollIntoView({ behavior: prevLen.current <= 1 ? "auto" : "smooth" });
+    else setUnseen((n) => n + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msgs.length]);
 
   const send = async () => {
     if (!text.trim() && !files.length) return; setSending(true); setErr(null);
@@ -138,7 +148,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       </div>
       {convLabels.length > 0 && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}</div>}
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+      <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
         {msgs.map((m) => (
           <div key={m.id} className={cn("flex", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
@@ -153,6 +163,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
         ))}
         <div ref={bottom} />
       </div>
+      {!atBottom && <div className="relative h-0"><button onClick={scrollToBottom} className="absolute right-4 -top-12 z-10 btn rounded-full px-2.5 py-2 shadow-lg" title="Xuống cuối hội thoại"><ArrowDown size={16} />{unseen > 0 && <span className="ml-1 bg-red-500 text-white rounded-full text-[10px] px-1.5">{unseen}</span>}</button></div>}
       <div className="bg-white border-t border-slate-200 p-3">
         {conv.scheduled_message && <div className="text-xs text-amber-700 mb-1 flex items-center gap-1"><Clock size={12} /> Tin hẹn giờ: “{conv.scheduled_message.text}” lúc {dt(conv.scheduled_message.send_at, "HH:mm dd/MM")}</div>}
         {err && <div className="text-xs text-red-600 mb-1">{err}</div>}
