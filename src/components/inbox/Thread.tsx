@@ -172,7 +172,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
         ))}
         <div ref={bottom} />
       </div>
-      {!atBottom && <div className="relative h-0"><button onClick={scrollToBottom} className="absolute right-4 -top-12 z-10 btn rounded-full px-2.5 py-2 shadow-lg" title="Xuống cuối hội thoại"><ArrowDown size={16} />{unseen > 0 && <span className="ml-1 bg-red-500 text-white rounded-full text-[10px] px-1.5">{unseen}</span>}</button></div>}
+      {!atBottom && <div className="relative h-0"><button onClick={scrollToBottom} className="absolute left-1/2 -translate-x-1/2 -top-12 z-10 btn rounded-full px-2.5 py-2 shadow-lg flex items-center" title="Xuống cuối hội thoại"><ArrowDown size={16} />{unseen > 0 && <span className="ml-1 bg-red-500 text-white rounded-full text-[10px] px-1.5">{unseen}</span>}</button></div>}
       <div className="bg-white border-t border-slate-200 p-3">
         {conv.scheduled_message && <div className="text-xs text-amber-700 mb-1 flex items-center gap-1"><Clock size={12} /> Tin hẹn giờ: “{conv.scheduled_message.text}” lúc {dt(conv.scheduled_message.send_at, "HH:mm dd/MM")}</div>}
         {err && <div className="text-xs text-red-600 mb-1">{err}</div>}

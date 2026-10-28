@@ -83,7 +83,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       <div className={cn("w-full md:w-[340px] shrink-0 border-r border-slate-200 bg-white flex-col", mobileView === "list" ? "flex" : "hidden md:flex")}>
         <div className="p-2 border-b border-slate-100 space-y-2">
           <div className="flex items-center gap-2">
-            <div className="relative flex-1"><Search size={14} className="absolute left-2 top-2.5 text-slate-400" /><input className="input pl-7" placeholder="Tìm tên, SĐT, nội dung" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            <div className="relative flex-1"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" /><input className="input" style={{ paddingLeft: 30 }} placeholder="Tìm tên, SĐT, nội dung" value={q} onChange={(e) => setQ(e.target.value)} /></div>
             <button className={cn("btn px-2", group && "bg-blue-50 border-blue-300")} title={group ? "Đang gộp FB + Zalo theo khách (bấm để tách)" : "Gộp hội thoại theo khách"} onClick={toggleGroup}><Users size={14} /></button>
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
