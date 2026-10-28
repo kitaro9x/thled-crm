@@ -30,6 +30,8 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [autoCreate, setAutoCreate] = useState<boolean | null>(null); // công tắc tự tạo khách/cơ hội (nguồn khách hàng)
   useEffect(() => { supabaseBrowser().from("crm_lead_sources").select("is_active").eq("type", "conversation").then(({ data }) => setAutoCreate(!!data?.some((x) => x.is_active))); }, []);
   const toggleAuto = async () => { const n = !autoCreate; setAutoCreate(n); await supabaseBrowser().from("crm_lead_sources").update({ is_active: n }).eq("type", "conversation"); };
+  // mở từ thông báo đẩy: /inbox?c=<conversation id>
+  useEffect(() => { try { const c = new URLSearchParams(window.location.search).get("c"); if (c) { setSel(c); setMobileView("thread"); } } catch {} }, []);
   useEffect(() => { try { const v = localStorage.getItem("inbox_group"); if (v !== null) setGroup(v === "1"); } catch {} }, []);
   const toggleGroup = () => { setGroup((g) => { try { localStorage.setItem("inbox_group", g ? "0" : "1"); } catch {} return !g; }); };
 

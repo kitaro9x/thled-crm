@@ -5,6 +5,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { Presence } from "@/components/Presence";
 import { NavLink } from "@/components/NavLink";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { PushToggle } from "@/components/PushToggle";
 
 const nav = [
   { href: "/inbox", label: "Hội thoại", icon: MessageSquare },
@@ -38,7 +39,7 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
       <aside className="hidden md:flex w-[72px] shrink-0 bg-slate-900 text-slate-300 flex-col items-center py-3 gap-1">
         <Link href="/inbox" className="mb-2 text-white font-black text-lg">TH</Link>
         {nav.map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={20} />} />)}
-        <div className="mt-auto"><ThemeToggle /></div>
+        <div className="mt-auto"><PushToggle /><ThemeToggle /></div>
         <div className="text-[10px] text-center px-1 leading-tight">
           <div className="w-8 h-8 mx-auto rounded-full bg-blue-600 text-white grid place-items-center font-bold mb-1">{me.name.slice(0, 1)}</div>
           <div className="truncate">{me.name}</div>
@@ -49,6 +50,7 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
       <nav className="md:hidden shrink-0 bg-slate-900 text-slate-300 flex justify-around border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
         {nav.slice(0, 5).map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={18} />} compact />)}
         <NavLink href="/settings" label="Thêm" icon={<Settings size={18} />} compact />
+        <PushToggle compact />
         <ThemeToggle compact />
       </nav>
       <Presence />

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { extractPhone, normalizePhone } from "@/lib/phone";
 import type { Attachment, ChannelType, LeadSource } from "@/lib/types";
 import { runAutomation } from "./automation";
+import { pushNewMessage } from "@/lib/crm/push";
 import { pickAssignee } from "./distribution";
 
 export interface InboundMessage {
@@ -77,6 +78,13 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
     const low = m.text.toLowerCase();
     const hit = (kw || []).filter((l) => (l.keywords || []).some((k: string) => k && low.includes(k.toLowerCase()))).map((l) => l.name).filter((n) => !(conv.labels || []).includes(n));
     if (hit.length) { const labels = [...(conv.labels || []), ...hit]; await db.from("crm_conversations").update({ labels }).eq("id", conv.id); conv.labels = labels; }
+  }
+
+  // thông báo đẩy cho nhân sự khi khách nhắn (kể cả nhóm)
+  if (direction === "in") {
+    const who = (kind === "group" ? (m.messageSenderName ? m.messageSenderName + " · " : "") : "") + (identity.display_name || m.senderName || "Khách");
+    const preview = m.text || (m.attachments?.length ? `[${m.attachments[0].type === "image" ? "Ảnh" : m.attachments[0].type === "video" ? "Video" : "Tệp"}]` : "[Tin nhắn]");
+    void pushNewMessage(db, { conversationId: conv.id, title: `${who} (${channel.type === "fb_page" ? "Messenger" : kind === "group" ? "Nhóm Zalo" : "Zalo"})`, body: preview, icon: identity.avatar_url, assignedTo: conv.assigned_to, labels: conv.labels || [] });
   }
 
   if (direction !== "in" || kind === "group") return { conversationId: conv.id, messageId: msg.id }; // nhóm: không bắt SĐT / tạo khách / phân phối
