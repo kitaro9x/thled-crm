@@ -26,7 +26,16 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
       if (p?.phone) { const { data: t } = await sb.from("crm_zalo_friend_tasks").select("status").eq("phone", p.phone).order("created_at", { ascending: false }).limit(1).maybeSingle(); setFriendTask(t); }
     } else {
       setPerson(null); setLeads([]); setOrders([]);
-      setPhone(extractPhone(conv.last_message_text) || ""); setName(conv.display_name || "");
+      setName(conv.display_name || "");
+      // gợi ý SĐT: chỉ lấy từ tin KHÁCH gửi, bỏ số trong danh sách loại trừ (hotline, nhân viên)
+      const [{ data: ins }, { data: st }] = await Promise.all([
+        sb.from("crm_messages").select("text").eq("conversation_id", conv.id).eq("direction", "in").not("text", "is", null).order("created_at", { ascending: false }).limit(30),
+        sb.from("crm_settings").select("value").eq("key", "phone").maybeSingle(),
+      ]);
+      const bl: string[] = (st?.value as any)?.blacklist || [];
+      let found = "";
+      for (const m of ins || []) { const ph = extractPhone(m.text); if (ph && !bl.includes(ph)) { found = ph; break; } }
+      setPhone(found);
     }
   };
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [conv.id, conv.customer_id]);

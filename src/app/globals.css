@@ -9,3 +9,31 @@ body { background: var(--bg); color: var(--fg); font-family: ui-sans-serif, syst
 .input { @apply w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-blue-500; }
 .card { @apply rounded-lg border border-slate-200 bg-white; }
 .chip { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium; }
+
+/* ===== Giao diện tối: ghi đè các lớp màu sáng đang dùng khắp app ===== */
+html.dark { color-scheme: dark; --bg:#0b1220; --fg:#e2e8f0; }
+html.dark .bg-white, html.dark .card, html.dark .btn, html.dark .input { background-color:#111a2e !important; color:#e2e8f0; }
+html.dark .btn:hover { background-color:#1a2540 !important; }
+html.dark .btn-primary { background-color:#2563eb !important; border-color:#2563eb !important; color:#fff; }
+html.dark .btn-primary:hover { background-color:#1d4ed8 !important; }
+html.dark .btn-danger { background-color:#dc2626 !important; border-color:#dc2626 !important; }
+html.dark .bg-slate-50, html.dark .bg-slate-100, html.dark .hover\:bg-slate-50:hover { background-color:#162036 !important; }
+html.dark .bg-slate-200 { background-color:#1e293b !important; }
+html.dark .bg-\[\#eef1f6\] { background-color:#0f172a !important; }
+html.dark .bg-blue-50 { background-color:#1e3a8a55 !important; }
+html.dark .bg-emerald-50 { background-color:#064e3b66 !important; }
+html.dark .bg-amber-50 { background-color:#78350f55 !important; }
+html.dark .bg-red-50 { background-color:#7f1d1d55 !important; }
+html.dark .bg-green-50 { background-color:#14532d66 !important; }
+html.dark .border-slate-50, html.dark .border-slate-100, html.dark .border-slate-200 { border-color:#1e293b !important; }
+html.dark .text-slate-800, html.dark .text-slate-700, html.dark .text-slate-600 { color:#cbd5e1 !important; }
+html.dark .text-slate-500, html.dark .text-slate-400 { color:#94a3b8 !important; }
+html.dark .text-blue-700 { color:#93c5fd !important; }
+html.dark .text-emerald-700 { color:#6ee7b7 !important; }
+html.dark .text-amber-700 { color:#fcd34d !important; }
+html.dark .text-red-600 { color:#fca5a5 !important; }
+html.dark .text-amber-900 { color:#fde68a !important; }
+html.dark .bg-amber-50.border-amber-200 { border-color:#92400e !important; }
+html.dark input, html.dark select, html.dark textarea { background-color:#111a2e; color:#e2e8f0; }
+html.dark input::placeholder, html.dark textarea::placeholder { color:#64748b; }
+html.dark .rounded-2xl.bg-white { background-color:#1e293b !important; }

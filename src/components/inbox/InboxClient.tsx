@@ -24,6 +24,9 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string }>({});
   const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
   const [mobileView, setMobileView] = useState<"list" | "thread" | "panel">("list"); // điện thoại: từng màn
+  const [autoCreate, setAutoCreate] = useState<boolean | null>(null); // công tắc tự tạo khách/cơ hội (nguồn khách hàng)
+  useEffect(() => { supabaseBrowser().from("crm_lead_sources").select("is_active").eq("type", "conversation").then(({ data }) => setAutoCreate(!!data?.some((x) => x.is_active))); }, []);
+  const toggleAuto = async () => { const n = !autoCreate; setAutoCreate(n); await supabaseBrowser().from("crm_lead_sources").update({ is_active: n }).eq("type", "conversation"); };
   useEffect(() => { try { const v = localStorage.getItem("inbox_group"); if (v !== null) setGroup(v === "1"); } catch {} }, []);
   const toggleGroup = () => { setGroup((g) => { try { localStorage.setItem("inbox_group", g ? "0" : "1"); } catch {} return !g; }); };
 
@@ -79,6 +82,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
             <button className={cn("btn px-2", group && "bg-blue-50 border-blue-300")} title={group ? "Đang gộp FB + Zalo theo khách (bấm để tách)" : "Gộp hội thoại theo khách"} onClick={toggleGroup}><Users size={14} /></button>
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
+          <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
           <div className="flex gap-1 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("chip border", qf === x.k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200")}>{x.l}</button>)}</div>
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
