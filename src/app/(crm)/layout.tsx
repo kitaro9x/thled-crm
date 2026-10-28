@@ -48,8 +48,8 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
       <main className="flex-1 min-w-0 min-h-0 overflow-hidden">{children}</main>
       {/* thanh điều hướng đáy cho điện thoại */}
       <nav className="md:hidden shrink-0 bg-slate-900 text-slate-300 flex justify-around border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
-        {nav.slice(0, 5).map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={18} />} compact />)}
-        <NavLink href="/settings" label="Thêm" icon={<Settings size={18} />} compact />
+        {/* điện thoại chỉ dùng để chat/chốt: bỏ CDP, Tri thức, Cài đặt (chỉnh trên máy tính) */}
+        {nav.filter((n) => ["/inbox", "/leads", "/activities", "/orders"].includes(n.href)).map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={18} />} compact />)}
         <PushToggle compact />
         <ThemeToggle compact />
       </nav>
