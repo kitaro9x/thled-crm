@@ -41,7 +41,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Zalo cá nhân / kênh khác: xếp hàng, worker gửi và ghi crm_messages
-  await db.from("crm_outbox").insert({ conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text, attachments, sent_by: user.id, source: "manual" });
+  const { error: qErr } = await db.from("crm_outbox").insert({ conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text: text || "", attachments, sent_by: user.id, source: "manual" });
+  if (qErr) return NextResponse.json({ error: "Không xếp hàng gửi được: " + qErr.message }, { status: 400 });
   await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text: text || null, attachments, sender_member_id: user.id, status: "queued" });
   return NextResponse.json({ ok: true, queued: true });
 }
