@@ -37,3 +37,8 @@ html.dark .bg-amber-50.border-amber-200 { border-color:#92400e !important; }
 html.dark input, html.dark select, html.dark textarea { background-color:#111a2e; color:#e2e8f0; }
 html.dark input::placeholder, html.dark textarea::placeholder { color:#64748b; }
 html.dark .rounded-2xl.bg-white { background-color:#1e293b !important; }
+
+/* nhãn NHÓM: dịu mắt ở cả sáng/tối */
+.group-badge { @apply inline-flex items-center gap-0.5 align-middle rounded px-1 py-px text-[10px] font-medium; background: rgba(16,185,129,.12); color: #047857; }
+html.dark .group-badge { background: rgba(16,185,129,.18); color: #6ee7b7; }
+html.dark .ring-emerald-400 { --tw-ring-color: rgba(52,211,153,.55); }
