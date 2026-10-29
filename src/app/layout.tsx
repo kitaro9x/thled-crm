@@ -4,7 +4,7 @@ export const metadata: Metadata = {
   title: "THLED CRM", description: "CRM bán hàng qua Zalo & Facebook cho THLED",
   manifest: "/manifest.json",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "THLED CRM" },
-  icons: { icon: "/icons/icon-192.png", apple: "/icons/apple-touch-icon.png" },
+  icons: { icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/icons/favicon-64.png", sizes: "64x64" }, { url: "/icons/icon-192.png", sizes: "192x192" }], apple: "/icons/apple-touch-icon.png" },
 };
 export const viewport: Viewport = { themeColor: "#0f172a", width: "device-width", initialScale: 1, maximumScale: 1, viewportFit: "cover" };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
