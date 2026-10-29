@@ -116,8 +116,20 @@ async function parseZinstant(c) {
       for (const m of body.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) images.push(m[1]);
       for (const m of body.matchAll(/>([^<>{}]{2,120})</g)) push(m[1]);
     }
-    return { text: texts.length ? texts.join("\n") : label, images: Array.from(new Set(images)).slice(0, 2) };
+    return { text: texts.length ? texts.join("\n") : label, images: Array.from(new Set(images)).slice(0, 2), body: body.slice(0, 4000), data };
   } catch (e) { return { text: "", images: [] }; }
+}
+
+// Tên ngân hàng → mã VietQR (để CRM tự vẽ QR chuyển khoản như thẻ Zalo)
+const BANKS = [["vietcombank|vcb|ngoại thương", "VCB"], ["techcombank|tcb", "TCB"], ["vietinbank|ctg|công thương", "CTG"], ["bidv|đầu tư và phát triển", "BIDV"], ["agribank|nông nghiệp", "VBA"], ["mb ?bank|mbbank|quân đội", "MB"], ["acb|á châu", "ACB"], ["vpbank|vp bank", "VPB"], ["tpbank|tp bank|tiên phong", "TPB"], ["sacombank|stb", "STB"], ["hdbank|hd bank", "HDB"], ["vib", "VIB"], ["shb", "SHB"], ["ocb|phương đông", "OCB"], ["msb|hàng hải", "MSB"], ["seabank", "SEAB"], ["eximbank|eib", "EIB"], ["lpbank|lienvietpostbank|bưu điện liên việt", "LPB"], ["nam á|namabank", "NAB"], ["bắc á|bacabank", "BAB"], ["scb", "SCB"], ["pvcombank", "PVCB"], ["kienlongbank|kiên long", "KLB"], ["vietbank", "VIETBANK"], ["abbank|an bình", "ABB"], ["bản việt|bvbank|vietcapital", "BVB"], ["cake", "CAKE"], ["timo", "TIMO"], ["momo", "MOMO"]];
+/** Rút thông tin tài khoản từ nội dung thẻ (JSON/HTML) + lời nhắn liền trước */
+function parseBank(z, hint) {
+  const src = [z?.text || "", JSON.stringify(z?.data || "") , z?.body || "", hint || ""].join("\n");
+  const bank = BANKS.find(([re]) => new RegExp(re, "i").test(src));
+  const account = (src.match(/(?<!\d)\d{8,19}(?!\d)/g) || []).filter((n) => !/^(19|20)\d{6}$/.test(n) && !/^1[6-9]\d{11}$/.test(n))[0]; // bỏ timestamp
+  const holderM = src.match(/(?:chủ tài khoản|chủ tk|tên tk|account name|holder)[^\p{L}\d]*([\p{Lu}][\p{L} ]{3,40})/iu) || src.match(/\d{8,19}\s*[-–]?\s*([\p{L}][\p{L} ]{3,40}?)(?:\s*(?:ngân hàng|bank|vcb|vietcombank|$))/iu);
+  if (!account && !bank) return null;
+  return { bank: bank?.[1] || null, bank_name: bank ? src.match(new RegExp(bank[0], "i"))?.[0] : null, account: account || null, holder: holderM?.[1]?.trim() || null };
 }
 
 /** Ghi tin do worker gửi (lời chào sau kết bạn…) vào CRM để hội thoại Zalo xuất hiện và gộp với khách */
@@ -201,7 +213,7 @@ async function main() {
       const uid = isGroup ? m.threadId : isSelf ? d.toUid || m.threadId : d.uidFrom || m.threadId;
       // Diễn giải nội dung theo loại tin của Zalo (giống hiển thị trên app)
       const c = d.content; const mt = d.msgType || ""; const attachments = []; let type = "text";
-      let text = typeof c === "string" ? c : "";
+      let text = typeof c === "string" ? c : ""; let extraRaw = null;
       const dur = (ms) => { const s = Math.round(Number(ms || 0) / 1000); return `${Math.floor(s / 60)} phút ${s % 60} giây`; };
       if (mt === "chat.photo") { type = "image"; attachments.push({ type: "image", url: c?.href || c?.hd || c?.thumb }); text = c?.title || ""; }
       else if (mt === "chat.gif") { type = "image"; attachments.push({ type: "image", url: c?.href || c?.thumb }); text = ""; }
@@ -219,9 +231,17 @@ async function main() {
       else if (mt === "chat.webcontent" || String(c?.action || "").startsWith("zinstant")) {
         const z = await parseZinstant(c || {});
         const isBank = /bank/i.test(String(c?.action || "")) || /ngân hàng|bank/i.test(z.text);
-        text = (isBank ? "🏦 Tài khoản ngân hàng" : "🗂️ Thẻ thông tin") + (z.text ? "\n" + z.text : "");
+        let bank = null;
+        if (isBank) {
+          // tin liền trước trong cùng hội thoại thường ghi "số tk + tên + ngân hàng" → dùng làm gợi ý
+          const { data: prev } = await sb.from("crm_messages").select("text").eq("direction", isSelf ? "out" : "in").order("sent_at", { ascending: false }).limit(3);
+          bank = parseBank(z, (prev || []).map((x) => x.text || "").join("\n"));
+        }
+        text = (isBank ? "🏦 Tài khoản ngân hàng" : "🗂️ Thẻ thông tin") + (z.text && z.text !== "[Tài khoản ngân hàng]" ? "\n" + z.text : "") + (bank ? `\n${bank.bank_name ? bank.bank_name.toUpperCase() + " · " : ""}${bank.account || ""}${bank.holder ? " · " + bank.holder : ""}` : "");
         for (const u of z.images) attachments.push({ type: "image", url: u });
         if (attachments.length) type = "image";
+        if (bank) extraRaw = { bank, zinstant_sample: (z.body || "").slice(0, 1500) };
+        else if (isBank) extraRaw = { zinstant_sample: (z.body || "").slice(0, 3000) };
       }
       else if (typeof c === "object" && c) {
         // bubble đặc biệt (cuộc gọi, poll, nhắc hẹn…): c.title/description, hoặc params JSON
@@ -251,12 +271,12 @@ async function main() {
         // nhóm: hội thoại = nhóm, tên người gửi ghi vào từng tin
         let gname = groupNames.get(uid);
         if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; if (/default|group_default|avt_default/i.test(avatar || "")) avatar = null; groupNames.set(uid, gname); await saveGroupMembers(api, uid, g); }
-        await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c } });
+        await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c, ...(extraRaw || {}) } });
         return;
       }
       // luôn tra hồ sơ của ĐỐI PHƯƠNG (khi mình gửi, d.dName là tên của mình → không dùng)
       { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || (isSelf ? undefined : senderName); avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
-      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c } });
+      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, ...(extraRaw || {}) } });
     } catch (e) { console.error("msg err", e.message); }
   });
   api.listener.start();
