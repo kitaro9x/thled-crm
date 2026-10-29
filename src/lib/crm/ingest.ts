@@ -12,6 +12,7 @@ export interface InboundMessage {
   senderName?: string | null;
   senderAvatar?: string | null;
   senderPhone?: string | null;        // Zalo cá nhân thường biết SĐT bạn bè
+  zaloLabels?: string[];              // phân loại Zalo của người gửi (worker gửi kèm để áp dụng ngay, không chờ đồng bộ)
   text?: string | null;
   type?: string;                      // text|image|file|sticker|call|location
   attachments?: Attachment[];
@@ -89,7 +90,15 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
 
   if (direction !== "in" || kind === "group") return { conversationId: conv.id, messageId: msg.id }; // nhóm: không bắt SĐT / tạo khách / phân phối
   // người mang nhãn "không tạo cơ hội" (vd Nhà cung cấp, Nhân viên — đồng bộ từ phân loại Zalo) → không bắt SĐT/tạo khách/lead
-  const zl: string[] = Array.isArray((identity as any).meta?.zalo_labels) ? (identity as any).meta.zalo_labels : [];
+  let zl: string[] = Array.isArray((identity as any).meta?.zalo_labels) ? (identity as any).meta.zalo_labels : [];
+  if (m.zaloLabels && JSON.stringify(m.zaloLabels) !== JSON.stringify(zl)) {
+    // phân loại Zalo mới hơn bản đã lưu → cập nhật identity + nhãn hội thoại ngay
+    const prev = zl; zl = m.zaloLabels;
+    await db.from("crm_identities").update({ meta: { ...((identity as any).meta || {}), zalo_labels: zl } }).eq("id", identity.id);
+    const keep = (conv.labels || []).filter((x: string) => !prev.includes(x));
+    conv.labels = Array.from(new Set([...keep, ...zl]));
+    await db.from("crm_conversations").update({ labels: conv.labels }).eq("id", conv.id);
+  }
   const allLabels = Array.from(new Set([...zl, ...(conv.labels || [])]));
   if (allLabels.length) {
     const { data: skip } = await db.from("crm_labels").select("name").in("name", allLabels).eq("skip_lead", true).limit(1);

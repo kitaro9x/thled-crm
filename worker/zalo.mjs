@@ -192,6 +192,7 @@ async function main() {
   } catch (e) { console.error("repair names err", e.message); }
 
   // Đồng bộ "Phân loại" trên Zalo → nhãn hội thoại CRM (tự tạo nhãn, gắn vào hội thoại, lưu vào identity.meta.zalo_labels)
+  const labelByUid = new Map(); // uid → [phân loại Zalo], dùng ngay khi có tin (không chờ 10 phút)
   async function syncLabels() {
     try {
       const res = await api.getLabels(); const labels = res?.labelData || [];
@@ -202,6 +203,7 @@ async function main() {
         await sb.from("crm_labels").upsert({ name: nm, color: l.color || "#64748b", zalo_label_id: l.id, source: "zalo" }, { onConflict: "name" });
         for (const uid of l.conversations || []) { const k = String(uid); byUid.set(k, [...(byUid.get(k) || []), nm]); }
       }
+      labelByUid.clear(); for (const [k, v] of byUid) labelByUid.set(k, v);
       const { data: ids } = await sb.from("crm_identities").select("id,external_id,meta").eq("channel_id", ch.id);
       for (const i of ids || []) {
         const cur = Array.isArray(i.meta?.zalo_labels) ? i.meta.zalo_labels : [];
@@ -318,7 +320,7 @@ async function main() {
       }
       // luôn tra hồ sơ của ĐỐI PHƯƠNG (khi mình gửi, d.dName là tên của mình → không dùng)
       { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || (isSelf ? undefined : senderName); avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
-      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, ...(extraRaw || {}) } });
+      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, zaloLabels: labelByUid.get(String(uid)) || [], text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, ...(extraRaw || {}) } });
     } catch (e) { console.error("msg err", e.message); }
   });
   api.listener.start();

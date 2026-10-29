@@ -11,6 +11,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (<html lang="vi" suppressHydrationWarning><body className="h-full">
     <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(t==='dark')document.documentElement.classList.add('dark')}catch(e){}` }} />
     {children}
-    <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}))}` }} />
+    <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(r=>{r.update().catch(()=>{});setInterval(()=>r.update().catch(()=>{}),6*3600000)}).catch(()=>{}))}` }} />
   </body></html>);
 }
