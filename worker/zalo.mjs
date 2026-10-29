@@ -35,9 +35,24 @@ const groupMembers = new Map(); // groupId -> [{id,name}]
 async function saveGroupMembers(api, gid, g) {
   try {
     let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.zaloName || m.dName, avatar: m.avatar || null }));
-    if (!mems.length && g?.memberIds?.length) { const info = await api.getUserInfo(g.memberIds.slice(0, 100)).catch(() => null); mems = Object.values(info?.changed_profiles || {}).map((u) => ({ id: String(u.userId), name: u.zaloName || u.displayName, avatar: u.avatar || null })); }
+    if (!mems.length) {
+      // Zalo thường trả memberIds rỗng, danh sách nằm ở memVerList dạng "uid_version"
+      let ids = (g?.memberIds?.length ? g.memberIds : (g?.memVerList || []).map((x) => String(x).split("_")[0])).map(String).filter(Boolean);
+      ids = Array.from(new Set(ids)).slice(0, 60);
+      for (let i = 0; i < ids.length; i += 15) {
+        const chunk = ids.slice(i, i + 15);
+        try {
+          const info = await api.getUserInfo(chunk);
+          for (const [k, u] of Object.entries({ ...(info?.unchanged_profiles || {}), ...(info?.changed_profiles || {}) })) {
+            const name = u?.zaloName || u?.displayName || u?.dName; if (name) mems.push({ id: String(u?.userId || k), name, avatar: u?.avatar || null });
+          }
+        } catch (e) { console.log("getUserInfo lỗi", e.message); }
+        await sleep(rnd(300, 700));
+      }
+      if (!mems.length) console.log("saveGroupMembers: memberIds=", (g?.memberIds || []).length, "memVerList=", (g?.memVerList || []).length, "sample=", JSON.stringify((g?.memVerList || [])[0]));
+    }
     mems = mems.filter((m) => m.id && m.name);
-    if (!mems.length) { console.log("saveGroupMembers: không lấy được thành viên", gid, Object.keys(g || {}).join(",")); return; }
+    if (!mems.length) { console.log("saveGroupMembers: không lấy được thành viên", gid); return; }
     groupMembers.set(gid, mems);
     const { data: ident } = await sb.from("crm_identities").select("id").eq("channel", "zalo_personal").eq("external_id", String(gid)).limit(1).maybeSingle();
     if (!ident) { console.log("saveGroupMembers: chưa có identity nhóm", gid); return; }
