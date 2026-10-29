@@ -252,7 +252,12 @@ async function main() {
       else if (mt === "chat.voice") { type = "audio"; attachments.push({ type: "audio", url: c?.href }); text = "🎤 Tin nhắn thoại"; }
       else if (mt === "chat.video.msg") { type = "video"; attachments.push({ type: "video", url: c?.href, thumb: c?.thumb }); text = c?.title || ""; }
       else if (mt === "share.file") { type = "file"; attachments.push({ type: "file", url: c?.href, name: c?.title }); text = ""; }
-      else if (mt === "chat.location.new") { text = `📍 Vị trí: ${c?.title || c?.description || ""}`.trim(); }
+      else if (mt === "chat.location.new") {
+        let lp = null; try { lp = typeof c?.params === "string" ? JSON.parse(c.params) : c?.params; } catch {}
+        const lat = Number(lp?.latitude), lng = Number(lp?.longitude);
+        text = `📍 Vị trí: ${c?.title || c?.description || ""}`.trim() + (c?.description && c?.title ? `\n${c.description}` : "") + (lat && lng ? `\nhttps://maps.google.com/?q=${lat},${lng}` : "");
+        if (lat && lng) extraRaw = { location: { lat, lng, title: c?.title || "", address: c?.description || "" } };
+      }
       else if (mt === "chat.recommended") { // danh thiếp / liên hệ / link
         const t = c?.title || c?.description || ""; text = c?.action === "recommened.user" || c?.type === "recommened.user" ? `👤 Danh thiếp: ${t}` : t || "[Thẻ chia sẻ]";
       }
