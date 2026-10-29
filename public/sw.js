@@ -1,5 +1,5 @@
 // Service worker: cài PWA + nhận thông báo đẩy. Không cache trang (CRM cần dữ liệu realtime).
-// v3 — icon TH trắng nền xanh
+// v4 — icon TH trắng nền navy
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", (e) => { if (e.request.mode === "navigate") e.respondWith(fetch(e.request).catch(() => new Response("<h1>Mất kết nối</h1><p>Kiểm tra mạng rồi mở lại THLED CRM.</p>", { headers: { "content-type": "text/html; charset=utf-8" } }))); });
