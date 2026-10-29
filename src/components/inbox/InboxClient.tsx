@@ -20,6 +20,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [convs, setConvs] = useState<Conversation[]>(initial);
   const [sel, setSel] = useState<string | null>(initial[0]?.id ?? null);
   const [q, setQ] = useState("");
+  const [hi, setHi] = useState(0); // dòng đang chọn bằng phím khi tìm kiếm
   const [qf, setQf] = useState<QuickFilter>("open");
   const [showFilter, setShowFilter] = useState(false);
   const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string }>({});
@@ -84,7 +85,14 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       <div className={cn("w-full md:w-[340px] shrink-0 border-r border-slate-200 bg-white flex-col", mobileView === "list" ? "flex" : "hidden md:flex")}>
         <div className="p-2 border-b border-slate-100 space-y-2">
           <div className="flex items-center gap-2">
-            <div className="relative flex-1"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" /><input className="input" style={{ paddingLeft: 30 }} placeholder="Tìm tên, SĐT, nội dung" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            <div className="relative flex-1"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" /><input className="input" style={{ paddingLeft: 30 }} placeholder="Tìm tên, SĐT, nội dung (↑↓ chọn, Enter mở)" value={q} onChange={(e) => { setQ(e.target.value); setHi(0); }}
+                onKeyDown={(e) => {
+                  if (!groups.length) return;
+                  if (e.key === "ArrowDown") { e.preventDefault(); setHi((i) => Math.min(i + 1, groups.length - 1)); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); setHi((i) => Math.max(i - 1, 0)); }
+                  else if (e.key === "Enter") { e.preventDefault(); const g = groups[hi] || groups[0]; if (g) { setSel(g.key); setMobileView("thread"); (e.target as HTMLInputElement).blur(); } }
+                  else if (e.key === "Escape") { setQ(""); (e.target as HTMLInputElement).blur(); }
+                }} /></div>
             <button className={cn("btn px-2", group && "bg-blue-50 border-blue-300")} title={group ? "Đang gộp FB + Zalo theo khách (bấm để tách)" : "Gộp hội thoại theo khách"} onClick={toggleGroup}><Users size={14} /></button>
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
@@ -101,8 +109,8 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         </div>
         <div className="flex-1 overflow-y-auto">
           {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
-          {groups.map((g) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
-            <button key={g.key} onClick={() => { setSel(g.key); setMobileView("thread"); }} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50")}>
+          {groups.map((g, gi) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
+            <button key={g.key} onClick={() => { setSel(g.key); setMobileView("thread"); }} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
               <div className={cn("relative", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={40} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={40} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2"><div className={cn("truncate", g.unread ? "font-semibold" : "font-medium")}>{c.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle group-badge"><Users size={10} />NHÓM</span>}{convName(c)}{g.convs.length > 1 && <span className="ml-1 text-[10px] text-slate-400">{g.convs.length} kênh</span>}</div><div className="text-[11px] text-slate-400 shrink-0">{ago(c.last_message_at)}</div></div>
