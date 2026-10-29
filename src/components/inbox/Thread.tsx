@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { cn, dt } from "@/lib/utils";
 import { LinkPreview, firstUrl } from "./LinkPreview";
+import { ForwardDialog } from "./ForwardDialog";
 
 export function Thread({ conv, siblings, labels, members, knowledge }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
   const sb = supabaseBrowser();
@@ -15,6 +16,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const byId = Object.fromEntries(all.map((c) => [c.id, c])) as Record<string, Conversation>;
   // kênh trả lời mặc định: hội thoại có tin khách gửi gần nhất
   const [target, setTarget] = useState<Conversation>(() => [...all].sort((a, b) => (b.last_inbound_at || b.last_message_at || "").localeCompare(a.last_inbound_at || a.last_message_at || ""))[0] || conv);
+  const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -124,6 +126,11 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   };
   const assign = async (id: string) => { await sb.from("crm_conversations").update({ assigned_to: id }).eq("id", conv.id); setShowAssign(false); };
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (atItems.length) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setAtIdx((i) => (i + 1) % atItems.length); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setAtIdx((i) => (i - 1 + atItems.length) % atItems.length); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickAt(atItems[atIdx]); return; }
+    }
     if (slashItems.length) {
       if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashItems.length); return; }
       if (e.key === "ArrowUp") { e.preventDefault(); setSlashIdx((i) => (i - 1 + slashItems.length) % slashItems.length); return; }
@@ -140,6 +147,13 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [slashIdx, setSlashIdx] = useState(0);
   useEffect(() => { setSlashIdx(0); }, [text]);
   const pickSlash = (k: { content: string }) => { setText(fill(k.content)); };
+  // nhóm Zalo: gõ "@" → gợi ý thành viên (worker lưu vào conv.meta.members); chèn "@Tên " → worker đổi thành tag thật
+  const gmembers = ((conv as any).meta?.members || []) as { id: string; name: string }[];
+  const atMatch = conv.kind === "group" && gmembers.length ? text.match(/(?:^|\s)@([^@\n]{0,30})$/) : null;
+  const atItems = atMatch ? gmembers.filter((m) => !atMatch[1] || m.name.toLowerCase().includes(atMatch[1].toLowerCase())).slice(0, 8) : [];
+  const [atIdx, setAtIdx] = useState(0);
+  useEffect(() => { setAtIdx(0); }, [atMatch?.[1]]);
+  const pickAt = (m: { name: string }) => { setText((t) => t.replace(/@([^@\n]{0,30})$/, "@" + m.name + " ")); };
 
   return (
     <>
@@ -157,10 +171,13 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       </div>
       {convLabels.length > 0 && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}</div>}
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
+      {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
+      {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
       <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
         {msgs.map((m) => (
-          <div key={m.id} className={cn("flex", m.direction === "out" ? "justify-end" : "justify-start")}>
-            {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
+          <div key={m.id} className={cn("flex group items-center gap-1", m.direction === "out" ? "justify-end" : "justify-start")}>
+            {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
+            {m.direction === "out" && (m.text || m.attachments?.length) ? <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button> : null}
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[11px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
@@ -168,6 +185,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
             </div>
+            {m.direction !== "out" && (m.text || m.attachments?.length) ? <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button> : null}
           </div>
         ))}
         <div ref={bottom} />
@@ -180,6 +198,10 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
         {slashItems.length > 0 && <div className="mb-2 card shadow-lg max-h-64 overflow-auto p-1">
           <div className="px-2 py-1 text-[11px] text-slate-400">Trả lời nhanh — ↑↓ chọn, Enter/Tab chèn, Esc huỷ</div>
           {slashItems.map((k, i) => <button key={k.id} onMouseDown={(e) => { e.preventDefault(); pickSlash(k); }} className={cn("block w-full text-left px-2 py-1.5 text-sm rounded", i === slashIdx ? "bg-blue-50" : "hover:bg-slate-50")}><b className="text-blue-700">{k.shortcut}</b> {k.title}<div className="text-[11px] text-slate-400 truncate">{k.content}</div></button>)}
+        </div>}
+        {atItems.length > 0 && <div className="mb-2 card shadow-lg max-h-56 overflow-auto p-1">
+          <div className="px-2 py-1 text-[11px] text-slate-400">Tag thành viên nhóm — ↑↓ chọn, Enter/Tab chèn</div>
+          {atItems.map((m, i) => <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pickAt(m); }} className={cn("block w-full text-left px-2 py-1.5 text-sm rounded", i === atIdx ? "bg-blue-50" : "hover:bg-slate-50")}>@{m.name}</button>)}
         </div>}
         {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
         <textarea className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}

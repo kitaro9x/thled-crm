@@ -17,12 +17,14 @@ const nav = [
   { href: "/reports", label: "Báo cáo", icon: BarChart3 },
   { href: "/settings", label: "Cài đặt", icon: Settings },
 ];
+const ADMIN_ONLY = ["/knowledge", "/settings"]; // chỉ admin thấy & chỉnh
 
 export default async function CrmLayout({ children }: { children: React.ReactNode }) {
   const sb = await supabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect("/login");
   const { data: me } = await sb.from("crm_members").select("name,role,is_active").eq("id", user.id).maybeSingle();
+  const navFor = me?.role === "admin" ? nav : nav.filter((n) => !ADMIN_ONLY.includes(n.href));
   if (!me || !me.is_active) {
     return (
       <div className="min-h-screen grid place-items-center p-6 text-center">
@@ -38,7 +40,7 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
     <div className="h-[100dvh] flex flex-col md:flex-row">
       <aside className="hidden md:flex w-[72px] shrink-0 bg-slate-900 text-slate-300 flex-col items-center py-3 gap-1">
         <Link href="/inbox" className="mb-2 text-white font-black text-lg">TH</Link>
-        {nav.map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={20} />} />)}
+        {navFor.map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={20} />} />)}
         <div className="mt-auto"><PushToggle /><ThemeToggle /></div>
         <div className="text-[10px] text-center px-1 leading-tight">
           <div className="w-8 h-8 mx-auto rounded-full bg-blue-600 text-white grid place-items-center font-bold mb-1">{me.name.slice(0, 1)}</div>

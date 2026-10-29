@@ -30,9 +30,37 @@ async function fetchAttachment(a) {
   return { data, filename: name, metadata: { totalSize: data.length } };
 }
 /** Gửi 1 tin kèm đính kèm qua Zalo: ảnh/file → sendMessage(attachments); video → sendVideo (cần URL public) */
+// Thành viên nhóm → crm_conversations.meta.members (CRM gợi ý khi gõ @)
+const groupMembers = new Map(); // groupId -> [{id,name}]
+async function saveGroupMembers(api, gid, g) {
+  try {
+    let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.zaloName || m.dName }));
+    if (!mems.length && g?.memberIds?.length) { const info = await api.getUserInfo(g.memberIds.slice(0, 100)).catch(() => null); mems = Object.values(info?.changed_profiles || {}).map((u) => ({ id: String(u.userId), name: u.zaloName || u.displayName })); }
+    mems = mems.filter((m) => m.id && m.name);
+    if (!mems.length) return;
+    groupMembers.set(gid, mems);
+    const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").limit(1).maybeSingle();
+    const { data: ident } = await sb.from("crm_identities").select("id").eq("external_id", String(gid)).eq("channel_id", ch?.id).maybeSingle();
+    if (ident) await sb.from("crm_conversations").update({ meta: { members: mems, members_at: new Date().toISOString() } }).eq("identity_id", ident.id).eq("kind", "group");
+  } catch (e) { console.error("saveGroupMembers", e.message); }
+}
+/** "@Tên" trong text → mentions zca-js [{pos,len,uid}] (khớp tên dài nhất trước) */
+async function buildMentions(api, gid, text) {
+  if (!text || !text.includes("@")) return [];
+  let mems = groupMembers.get(gid);
+  if (!mems) { const gi = await api.getGroupInfo(gid).catch(() => null); await saveGroupMembers(api, gid, gi?.gridInfoMap?.[gid]); mems = groupMembers.get(gid) || []; }
+  const out = [];
+  for (const m of [...mems].sort((a, b) => b.name.length - a.name.length)) {
+    let from = 0; const needle = "@" + m.name;
+    while (true) { const pos = text.indexOf(needle, from); if (pos < 0) break; if (!out.some((o) => pos < o.pos + o.len && o.pos < pos + needle.length)) out.push({ pos, len: needle.length, uid: m.id }); from = pos + needle.length; }
+  }
+  return out;
+}
 async function zaloSend(api, uid, text, attachments, ttype = ThreadType.User) {
   const atts = attachments || [];
+  const mentions = ttype === ThreadType.Group ? await buildMentions(api, uid, text) : [];
   if (!atts.length) {
+    if (mentions.length) return api.sendMessage({ msg: text, mentions }, uid, ttype);
     // có link → gửi dạng thẻ link (có ảnh/tiêu đề) như app Zalo
     const link = (text || "").match(/https?:\/\/[^\s<>"']+/i)?.[0];
     if (link) { try { return await api.sendLink({ msg: text, link }, uid, ttype); } catch (e) { console.error("sendLink fail, fallback text:", e.message); } }
@@ -41,7 +69,7 @@ async function zaloSend(api, uid, text, attachments, ttype = ThreadType.User) {
   const videos = atts.filter((a) => a.type === "video"); const others = atts.filter((a) => a.type !== "video");
   if (others.length) {
     const files = []; for (const a of others) files.push(await fetchAttachment(a));
-    await api.sendMessage({ msg: text || "", attachments: files }, uid, ttype);
+    await api.sendMessage({ msg: text || "", attachments: files, mentions }, uid, ttype);
   } else if (text) await api.sendMessage(text, uid, ttype);
   for (const v of videos) {
     try { await api.sendVideo({ msg: "", videoUrl: v.url, thumbnailUrl: v.thumb || v.url }, uid, ttype); }
@@ -219,7 +247,7 @@ async function main() {
       if (isGroup) {
         // nhóm: hội thoại = nhóm, tên người gửi ghi vào từng tin
         let gname = groupNames.get(uid);
-        if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; groupNames.set(uid, gname); }
+        if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; groupNames.set(uid, gname); await saveGroupMembers(api, uid, g); }
         await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c } });
         return;
       }
