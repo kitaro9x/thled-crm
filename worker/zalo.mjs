@@ -259,7 +259,13 @@ async function main() {
         if (lat && lng) extraRaw = { location: { lat, lng, title: c?.title || "", address: c?.description || "" } };
       }
       else if (mt === "chat.recommended") { // danh thiếp / liên hệ / link
-        const t = c?.title || c?.description || ""; text = c?.action === "recommened.user" || c?.type === "recommened.user" ? `👤 Danh thiếp: ${t}` : t || "[Thẻ chia sẻ]";
+        const t = c?.title || c?.description || "";
+        if (c?.action === "recommened.user" || c?.type === "recommened.user") {
+          let cd = null; try { cd = typeof c?.description === "string" && c.description.startsWith("{") ? JSON.parse(c.description) : null; } catch {}
+          const phone = cd?.phone || "";
+          text = `👤 Danh thiếp: ${c?.title || ""}`; // không ghi SĐT vào text để CRM không tự tạo khách bằng số của người thứ ba
+          extraRaw = { contact: { name: c?.title || "", phone, avatar: c?.thumb || null, qr: cd?.qrCodeUrl || null, uid: String(c?.params || "") } };
+        } else text = t || "[Thẻ chia sẻ]";
       }
       else if (mt === "chat.link") { text = [c?.title, c?.href].filter(Boolean).join("\n") || "[Link]"; if (c?.thumb) attachments.push({ type: "link", url: c.href, thumb: c.thumb }); }
       else if (mt === "chat.todo") { text = `☑️ Việc cần làm: ${c?.title || c?.description || ""}`; }
