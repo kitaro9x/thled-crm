@@ -34,8 +34,8 @@ async function fetchAttachment(a) {
 const groupMembers = new Map(); // groupId -> [{id,name}]
 async function saveGroupMembers(api, gid, g) {
   try {
-    let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.zaloName || m.dName }));
-    if (!mems.length && g?.memberIds?.length) { const info = await api.getUserInfo(g.memberIds.slice(0, 100)).catch(() => null); mems = Object.values(info?.changed_profiles || {}).map((u) => ({ id: String(u.userId), name: u.zaloName || u.displayName })); }
+    let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.zaloName || m.dName, avatar: m.avatar || null }));
+    if (!mems.length && g?.memberIds?.length) { const info = await api.getUserInfo(g.memberIds.slice(0, 100)).catch(() => null); mems = Object.values(info?.changed_profiles || {}).map((u) => ({ id: String(u.userId), name: u.zaloName || u.displayName, avatar: u.avatar || null })); }
     mems = mems.filter((m) => m.id && m.name);
     if (!mems.length) return;
     groupMembers.set(gid, mems);
@@ -250,7 +250,7 @@ async function main() {
       if (isGroup) {
         // nhóm: hội thoại = nhóm, tên người gửi ghi vào từng tin
         let gname = groupNames.get(uid);
-        if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; groupNames.set(uid, gname); await saveGroupMembers(api, uid, g); }
+        if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; if (/default|group_default|avt_default/i.test(avatar || "")) avatar = null; groupNames.set(uid, gname); await saveGroupMembers(api, uid, g); }
         await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c } });
         return;
       }

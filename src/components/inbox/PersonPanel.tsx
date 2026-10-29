@@ -5,6 +5,7 @@ import { Phone, Plus, UserPlus, Sparkles } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Lead, Person } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
+import { GroupAvatar } from "@/components/GroupAvatar";
 import { extractPhone } from "@/lib/phone";
 import { money, dt } from "@/lib/utils";
 
@@ -77,7 +78,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
   return (
     <div className="w-full md:w-[320px] shrink-0 md:border-l border-slate-200 bg-white overflow-y-auto flex-1 md:flex-none">
       <div className="p-4 border-b border-slate-100 flex items-center gap-3">
-        <Avatar src={person?.avatar_url || conv.identity_avatar} name={person?.name || conv.display_name} size={44} />
+        {conv.kind === "group" ? <GroupAvatar src={conv.identity_avatar} name={conv.display_name} members={(conv as any).meta?.members} size={44} /> : <Avatar src={person?.avatar_url || conv.identity_avatar} name={person?.name || conv.display_name} size={44} />}
         <div className="min-w-0"><div className="font-semibold truncate">{person?.name || conv.display_name}</div>{person && <Link href={`/cdp/${person.id}`} className="text-xs text-blue-600">Xem khách hàng</Link>}</div>
       </div>
       {!person ? (

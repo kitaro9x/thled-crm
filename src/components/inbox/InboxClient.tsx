@@ -4,6 +4,7 @@ import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRigh
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
+import { GroupAvatar } from "@/components/GroupAvatar";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { ago, cn, convName } from "@/lib/utils";
 import { Thread } from "./Thread";
@@ -102,7 +103,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
           {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
           {groups.map((g) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
             <button key={g.key} onClick={() => { setSel(g.key); setMobileView("thread"); }} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50")}>
-              <div className={cn("relative", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}><Avatar src={c.identity_avatar} name={convName(c)} size={40} /><span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
+              <div className={cn("relative", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={40} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={40} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2"><div className={cn("truncate", g.unread ? "font-semibold" : "font-medium")}>{c.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle rounded px-1 py-px text-[10px] font-semibold bg-emerald-100 text-emerald-700"><Users size={10} />NHÓM</span>}{convName(c)}{g.convs.length > 1 && <span className="ml-1 text-[10px] text-slate-400">{g.convs.length} kênh</span>}</div><div className="text-[11px] text-slate-400 shrink-0">{ago(c.last_message_at)}</div></div>
                 <div className="flex items-center justify-between gap-2"><div className="truncate text-xs text-slate-500">{c.kind === "comment" && "💬 "}{c.kind === "group" && "👥 "}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[10px] px-1.5 min-w-[18px] text-center">{g.unread}</span>}</div>
