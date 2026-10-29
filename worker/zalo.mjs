@@ -37,11 +37,11 @@ async function saveGroupMembers(api, gid, g) {
     let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.zaloName || m.dName, avatar: m.avatar || null }));
     if (!mems.length && g?.memberIds?.length) { const info = await api.getUserInfo(g.memberIds.slice(0, 100)).catch(() => null); mems = Object.values(info?.changed_profiles || {}).map((u) => ({ id: String(u.userId), name: u.zaloName || u.displayName, avatar: u.avatar || null })); }
     mems = mems.filter((m) => m.id && m.name);
-    if (!mems.length) return;
+    if (!mems.length) { console.log("saveGroupMembers: không lấy được thành viên", gid, Object.keys(g || {}).join(",")); return; }
     groupMembers.set(gid, mems);
-    const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").limit(1).maybeSingle();
-    const { data: ident } = await sb.from("crm_identities").select("id").eq("external_id", String(gid)).eq("channel_id", ch?.id).maybeSingle();
-    if (ident) { // giữ các khoá meta khác (vd alias = tên nhóm đặt trong CRM)
+    const { data: ident } = await sb.from("crm_identities").select("id").eq("channel", "zalo_personal").eq("external_id", String(gid)).limit(1).maybeSingle();
+    if (!ident) { console.log("saveGroupMembers: chưa có identity nhóm", gid); return; }
+    { // giữ các khoá meta khác (vd alias = tên nhóm đặt trong CRM)
       const { data: cv } = await sb.from("crm_conversations").select("id,meta").eq("identity_id", ident.id).eq("kind", "group").maybeSingle();
       if (cv) await sb.from("crm_conversations").update({ meta: { ...(cv.meta || {}), members: mems, members_at: new Date().toISOString() } }).eq("id", cv.id);
     }
@@ -203,6 +203,22 @@ async function main() {
     } catch (e) { console.error("syncLabels err", e.message); }
   }
   await syncLabels(); setInterval(syncLabels, 10 * 60000);
+  // nạp thành viên + avatar cho mọi nhóm đã có trong CRM (khởi động + mỗi 6 giờ)
+  async function syncGroups() {
+    try {
+      const { data: gs } = await sb.from("crm_conversations").select("id, crm_identities!inner(external_id)").eq("kind", "group").limit(300);
+      for (const g of gs || []) {
+        const gid = String(g.crm_identities.external_id);
+        const gi = await api.getGroupInfo(gid).catch((e) => { console.log("getGroupInfo lỗi", gid, e.message); return null; });
+        const info = gi?.gridInfoMap?.[gid]; if (!info) continue;
+        await saveGroupMembers(api, gid, info);
+        const avt = info.avt || info.fullAvt; if (avt && !/default/i.test(avt)) await sb.from("crm_identities").update({ avatar_url: avt, display_name: info.name || undefined }).eq("channel", "zalo_personal").eq("external_id", gid);
+        await sleep(rnd(800, 1500));
+      }
+      console.log("syncGroups xong:", (gs || []).length, "nhóm");
+    } catch (e) { console.error("syncGroups", e.message); }
+  }
+  syncGroups(); setInterval(syncGroups, 6 * 3600000);
 
   // 2. listener
   const groupNames = new Map();
