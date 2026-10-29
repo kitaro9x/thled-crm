@@ -7,7 +7,10 @@ import { Avatar } from "@/components/Avatar";
 import { ChannelIcon } from "@/components/ChannelIcon";
 
 /** Chuyển tiếp 1 tin (chữ + đính kèm) sang hội thoại khác */
-export function ForwardDialog({ text, attachments, excludeId, onClose }: { text?: string | null; attachments?: Attachment[]; excludeId: string; onClose: (sent?: string) => void }) {
+type Item = { text?: string | null; attachments?: Attachment[] };
+export function ForwardDialog({ text, attachments, items, excludeId, onClose }: { text?: string | null; attachments?: Attachment[]; items?: Item[]; excludeId: string; onClose: (sent?: string) => void }) {
+  const list0: Item[] = items?.length ? items : [{ text, attachments }];
+  const nImg = list0.reduce((n, it) => n + (it.attachments?.length || 0), 0);
   const [q, setQ] = useState(""); const [list, setList] = useState<Conversation[]>([]); const [busy, setBusy] = useState<string | null>(null); const [err, setErr] = useState("");
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -25,15 +28,19 @@ export function ForwardDialog({ text, attachments, excludeId, onClose }: { text?
   }, [onClose]);
   const send = async (c: Conversation) => {
     setBusy(c.id); setErr("");
-    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: c.id, text: text || "", attachments: attachments || [] }) });
-    const j = await r.json(); setBusy(null);
-    if (!r.ok) { setErr(j.error || "Gửi lỗi"); return; }
-    onClose(c.display_name || c.person_name || "khách");
+    // gom: toàn bộ ảnh/tệp gửi chung 1 lượt, các đoạn chữ gửi từng tin
+    const atts = list0.flatMap((it) => it.attachments || []); const texts = list0.map((it) => (it.text || "").trim()).filter(Boolean);
+    const payloads = texts.length === 1 && list0.length === 1 ? [{ text: texts[0], attachments: atts }] : [...texts.map((t) => ({ text: t, attachments: [] as Attachment[] })), ...(atts.length ? [{ text: "", attachments: atts }] : [])];
+    for (const p of payloads) {
+      const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: c.id, ...p }) });
+      if (!r.ok) { const j = await r.json(); setBusy(null); setErr(j.error || "Gửi lỗi"); return; }
+    }
+    setBusy(null); onClose(c.display_name || c.person_name || "khách");
   };
   return <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
     <div ref={box} className="card w-full max-w-md max-h-[80vh] flex flex-col">
       <div className="flex items-center gap-2 p-3 border-b border-slate-100"><Forward size={16} /><b className="flex-1">Chuyển tiếp tới…</b><button onClick={() => onClose()} className="p-1 rounded hover:bg-slate-100"><X size={16} /></button></div>
-      <div className="p-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100 line-clamp-2">{text || (attachments?.length ? `[${attachments.length} tệp đính kèm]` : "")}</div>
+      <div className="p-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100 line-clamp-2">{list0.length > 1 ? `${list0.length} tin nhắn` + (nImg ? ` · ${nImg} ảnh/tệp` : "") : (text || (nImg ? `[${nImg} tệp đính kèm]` : ""))}</div>
       <div className="p-2 relative"><Search size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" /><input autoFocus className="input" style={{ paddingLeft: 30 }} placeholder="Tìm tên khách, SĐT…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       {err && <div className="px-3 text-xs text-red-600">{err}</div>}
       <div className="flex-1 overflow-y-auto">

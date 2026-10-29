@@ -17,7 +17,10 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const byId = Object.fromEntries(all.map((c) => [c.id, c])) as Record<string, Conversation>;
   // kênh trả lời mặc định: hội thoại có tin khách gửi gần nhất
   const [target, setTarget] = useState<Conversation>(() => [...all].sort((a, b) => (b.last_inbound_at || b.last_message_at || "").localeCompare(a.last_inbound_at || a.last_message_at || ""))[0] || conv);
-  const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
+  const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[]; items?: { text?: string | null; attachments?: any[] }[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set()); // chọn nhiều tin để chuyển tiếp
+  const togglePick = (id: string) => setPicked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  useEffect(() => { setPicked(new Set()); }, [conv.id]);
   const [msgs, setMsgs] = useState<Message[]>([]);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -180,13 +183,14 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       </div>
       {convLabels.length > 0 && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}</div>}
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
-      {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
+      {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
+      {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
       <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
         {msgs.map((m) => (
           <div key={m.id} className={cn("flex group items-center gap-1", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
-            {m.direction === "out" && (m.text || m.attachments?.length) ? <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button> : null}
+            {m.direction === "out" && (m.text || m.attachments?.length) ? <span className={cn("flex items-center", picked.size ? "opacity-100" : "opacity-0 group-hover:opacity-100")}><input type="checkbox" title="Chọn để chuyển tiếp nhiều tin" checked={picked.has(m.id)} onChange={() => togglePick(m.id)} className="w-4 h-4 cursor-pointer" />{!picked.size && <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button>}</span> : null}
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[11px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
@@ -194,7 +198,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
             </div>
-            {m.direction !== "out" && (m.text || m.attachments?.length) ? <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="opacity-0 group-hover:opacity-100 p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button> : null}
+            {m.direction !== "out" && (m.text || m.attachments?.length) ? <span className={cn("flex items-center", picked.size ? "opacity-100" : "opacity-0 group-hover:opacity-100")}><input type="checkbox" title="Chọn để chuyển tiếp nhiều tin" checked={picked.has(m.id)} onChange={() => togglePick(m.id)} className="w-4 h-4 cursor-pointer" />{!picked.size && <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button>}</span> : null}
           </div>
         ))}
         <div ref={bottom} />
