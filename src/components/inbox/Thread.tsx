@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
-import { cn, dt } from "@/lib/utils";
+import { cn, dt, convName } from "@/lib/utils";
 import { LinkPreview, firstUrl } from "./LinkPreview";
 import { ForwardDialog } from "./ForwardDialog";
 
@@ -124,6 +124,14 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     const next = convLabels.includes(name) ? convLabels.filter((l) => l !== name) : [...convLabels, name];
     setConvLabels(next); await sb.from("crm_conversations").update({ labels: next }).eq("id", conv.id);
   };
+  // đổi tên nhóm chỉ trong CRM (không đổi trên Zalo): lưu meta.alias, để trống = dùng lại tên gốc
+  const renameGroup = async () => {
+    const cur = (conv as any).meta?.alias || "";
+    const v = window.prompt("Tên nhóm hiển thị trong CRM (để trống để dùng tên gốc trên Zalo):", cur || conv.display_name || "");
+    if (v === null) return;
+    const alias = v.trim() && v.trim() !== conv.display_name ? v.trim() : null;
+    await sb.from("crm_conversations").update({ meta: { ...((conv as any).meta || {}), alias } }).eq("id", conv.id);
+  };
   const assign = async (id: string) => { await sb.from("crm_conversations").update({ assigned_to: id }).eq("id", conv.id); setShowAssign(false); };
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (atItems.length) {
@@ -140,7 +148,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
   // điền biến {fullname} {gender} {phone} khi chèn trả lời nhanh
-  const fill = (t: string) => t.replace(/\{fullname\}/g, conv.person_name || conv.display_name || "anh/chị").replace(/\{gender\}/g, "anh/chị").replace(/\{phone\}/g, conv.person_phone || "");
+  const fill = (t: string) => t.replace(/\{fullname\}/g, convName(conv) || "anh/chị").replace(/\{gender\}/g, "anh/chị").replace(/\{phone\}/g, conv.person_phone || "");
   // gõ "/" ở đầu ô chat → hiện gợi ý trả lời nhanh, lọc theo chữ sau dấu /; Enter/Tab chọn mục đầu
   const slashMatch = text.match(/^\/(\S*)$/);
   const slashItems = slashMatch ? knowledge.filter((k) => matchQuick(k, slashMatch[1])).slice(0, 8) : [];
@@ -159,7 +167,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     <>
       <div className="h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
         <div className="flex -space-x-1">{Array.from(new Set(all.map((c) => c.channel_type))).map((t) => <ChannelIcon key={t} type={t} size={22} />)}</div>
-        <div className="min-w-0"><div className="font-semibold truncate">{conv.person_name || conv.display_name}</div><div className="text-xs text-slate-500">{multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
+        <div className="min-w-0"><div className="font-semibold truncate flex items-center gap-1">{conv.kind === "group" && <span className="inline-flex items-center gap-0.5 rounded px-1 py-px text-[10px] font-semibold bg-emerald-100 text-emerald-700 shrink-0"><Users size={10} />NHÓM</span>}<span className="truncate">{convName(conv)}</span>{conv.kind === "group" && <button title="Đổi tên nhóm trong CRM" onClick={renameGroup} className="p-0.5 text-slate-400 hover:text-blue-600 shrink-0"><Pencil size={12} /></button>}</div><div className="text-xs text-slate-500 truncate">{conv.kind === "group" ? `Nhóm Zalo · ${((conv as any).meta?.members?.length || 0) > 0 ? `${(conv as any).meta.members.length} thành viên` : "Tên gốc: " + (conv.display_name || "")}` : (multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name)}{conv.kind === "group" && (conv as any).meta?.alias && ` · Tên gốc: ${conv.display_name}`}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
         <div ref={headRef} className="ml-auto flex items-center gap-1 relative md:mr-10">
           <button className="btn px-2" title="Quan trọng" onClick={() => sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id)}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} /></button>
           <button className="btn px-2" title="Gắn nhãn" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); }}><Tag size={15} /></button>

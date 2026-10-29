@@ -41,7 +41,10 @@ async function saveGroupMembers(api, gid, g) {
     groupMembers.set(gid, mems);
     const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").limit(1).maybeSingle();
     const { data: ident } = await sb.from("crm_identities").select("id").eq("external_id", String(gid)).eq("channel_id", ch?.id).maybeSingle();
-    if (ident) await sb.from("crm_conversations").update({ meta: { members: mems, members_at: new Date().toISOString() } }).eq("identity_id", ident.id).eq("kind", "group");
+    if (ident) { // giữ các khoá meta khác (vd alias = tên nhóm đặt trong CRM)
+      const { data: cv } = await sb.from("crm_conversations").select("id,meta").eq("identity_id", ident.id).eq("kind", "group").maybeSingle();
+      if (cv) await sb.from("crm_conversations").update({ meta: { ...(cv.meta || {}), members: mems, members_at: new Date().toISOString() } }).eq("id", cv.id);
+    }
   } catch (e) { console.error("saveGroupMembers", e.message); }
 }
 /** "@Tên" trong text → mentions zca-js [{pos,len,uid}] (khớp tên dài nhất trước) */
