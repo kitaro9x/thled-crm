@@ -60,7 +60,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
-  const scroller = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null); const prevLen = useRef(0); const taRef = useRef<HTMLTextAreaElement>(null);
   const [atBottom, setAtBottom] = useState(true); const [unseen, setUnseen] = useState(0);
   const onScroll = () => { const el = scroller.current; if (!el) return; const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(near); if (near) setUnseen(0); };
   const scrollToBottom = () => { bottom.current?.scrollIntoView({ behavior: "smooth" }); setUnseen(0); };
@@ -96,18 +96,22 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     return out;
   };
 
+  const jumpBottom = () => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; setAtBottom(true); setUnseen(0); };
   useEffect(() => {
-    sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at").limit(400).then(({ data }) => setMsgs((data as Message[]) || []));
+    // mở hội thoại: xoá tin cũ, tải tin mới, nhảy xuống cuối, focus ô nhập để gõ ngay
+    setMsgs([]); prevLen.current = 0; setAtBottom(true); setUnseen(0); setPicked(new Set());
+    sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at").limit(400).then(({ data }) => { setMsgs((data as Message[]) || []); requestAnimationFrame(() => { jumpBottom(); setTimeout(jumpBottom, 150); setTimeout(jumpBottom, 600); }); });
+    if (window.matchMedia("(min-width: 768px)").matches) setTimeout(() => taRef.current?.focus(), 50); // điện thoại: không bật bàn phím tự động
     sb.from("crm_conversations").update({ unread_count: 0 }).in("id", ids).then(() => {});
     const ch = sb.channel("thread-" + ids.join("_")).on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => (m.some((x) => x.id === (p.new as Message).id) ? m : [...m.filter((x) => !(x.id.startsWith("tmp-") && x.direction === "out" && x.text === (p.new as Message).text)), p.new as Message].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || "")))))
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => m.map((x) => (x.id === (p.new as Message).id ? { ...x, ...(p.new as Message) } : x)))).subscribe();
     return () => { sb.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv.id]);
-  const prevLen = useRef(0);
   useEffect(() => {
-    const grew = msgs.length > prevLen.current; prevLen.current = msgs.length;
-    if (atBottom || !grew) bottom.current?.scrollIntoView({ behavior: prevLen.current <= 1 ? "auto" : "smooth" });
+    const grew = msgs.length > prevLen.current; const first = prevLen.current === 0; prevLen.current = msgs.length;
+    if (first) return; // lần tải đầu đã xử lý ở trên
+    if (atBottom || !grew) bottom.current?.scrollIntoView({ behavior: "smooth" });
     else setUnseen((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs.length]);
@@ -193,7 +197,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && (m.text || m.attachments?.length) ? <span className={cn("flex items-center", picked.size ? "opacity-100" : "opacity-0 group-hover:opacity-100")}><input type="checkbox" title="Chọn để chuyển tiếp nhiều tin" checked={picked.has(m.id)} onChange={() => togglePick(m.id)} className="w-4 h-4 cursor-pointer" />{!picked.size && <button title="Chuyển tiếp" onClick={() => setFwd({ text: m.text, attachments: m.attachments })} className="p-1 rounded text-slate-400 hover:text-blue-600"><Forward size={14} /></button>}</span> : null}
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
-              {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
+              {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" onLoad={() => { if (atBottom) jumpBottom(); }} /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[11px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
@@ -218,7 +222,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           {atItems.map((m, i) => <button key={m.id} onMouseDown={(e) => { e.preventDefault(); pickAt(m); }} className={cn("block w-full text-left px-2 py-1.5 text-sm rounded", i === atIdx ? "bg-blue-50" : "hover:bg-slate-50")}>@{m.name}</button>)}
         </div>}
         {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
-        <textarea className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
+        <textarea ref={taRef} className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onPaste={(e) => { const fs = Array.from(e.clipboardData.files || []); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
           onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }} onDragOver={(e) => e.preventDefault()} />
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
