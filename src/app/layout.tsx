@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "THLED CRM" },
   icons: { icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/icons/favicon-64.png", sizes: "64x64" }, { url: "/icons/icon-192.png", sizes: "192x192" }], apple: "/icons/apple-touch-icon.png" },
 };
-export const viewport: Viewport = { themeColor: "#0f172a", width: "device-width", initialScale: 1, maximumScale: 1, viewportFit: "cover" };
+export const viewport: Viewport = { themeColor: "#2563eb", width: "device-width", initialScale: 1, maximumScale: 1, viewportFit: "cover" };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (<html lang="vi" suppressHydrationWarning><body className="h-full">
     <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(t==='dark')document.documentElement.classList.add('dark')}catch(e){}` }} />
