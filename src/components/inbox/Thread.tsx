@@ -15,6 +15,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const sb = supabaseBrowser();
   const all = siblings && siblings.length ? siblings : [conv];
   const ids = all.map((c) => c.id);
+  const memberName = Object.fromEntries(members.map((x) => [x.id, x.name])); // tên người trả lời trên bong bóng gửi đi
   const multi = all.length > 1;
   const byId = Object.fromEntries(all.map((c) => [c.id, c])) as Record<string, Conversation>;
   // kênh trả lời mặc định: hội thoại có tin khách gửi gần nhất
@@ -24,6 +25,15 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const togglePick = (id: string) => setPicked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   useEffect(() => { setPicked(new Set()); }, [conv.id]);
   const [msgs, setMsgs] = useState<Message[]>([]);
+  const PAGE = 200; const [hasMore, setHasMore] = useState(false); const [loadingOld, setLoadingOld] = useState(false);
+  const loadOlder = async () => {
+    const oldest = msgs[0]?.sent_at; if (!oldest || loadingOld) return; setLoadingOld(true);
+    const el = scroller.current; const before = el ? el.scrollHeight - el.scrollTop : 0;
+    const { data } = await sb.from("crm_messages").select("*").in("conversation_id", ids).lt("sent_at", oldest).order("sent_at", { ascending: false }).limit(PAGE);
+    const arr = ((data as Message[]) || []).reverse(); setHasMore(arr.length >= PAGE);
+    setMsgs((m) => [...arr, ...m]); setLoadingOld(false);
+    requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - before; }); // giữ nguyên vị trí đang đọc
+  };
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [schedule, setSchedule] = useState<string>("");
@@ -101,7 +111,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   useEffect(() => {
     // mở hội thoại: xoá tin cũ, tải tin mới, nhảy xuống cuối, focus ô nhập để gõ ngay
     setMsgs([]); prevLen.current = 0; setAtBottom(true); setUnseen(0); setPicked(new Set());
-    sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at").limit(400).then(({ data }) => { setMsgs((data as Message[]) || []); requestAnimationFrame(() => { jumpBottom(); setTimeout(jumpBottom, 150); setTimeout(jumpBottom, 600); }); });
+    // LỖI CŨ: order tăng dần + limit → hội thoại dài bị cắt mất tin MỚI. Giờ lấy 200 tin mới nhất rồi đảo lại; tin cũ hơn tải thêm bằng nút.
+    sb.from("crm_messages").select("*").in("conversation_id", ids).order("sent_at", { ascending: false }).limit(PAGE).then(({ data }) => { const arr = ((data as Message[]) || []).reverse(); setHasMore(arr.length >= PAGE); setMsgs(arr); requestAnimationFrame(() => { jumpBottom(); setTimeout(jumpBottom, 150); setTimeout(jumpBottom, 600); }); });
     if (window.matchMedia("(min-width: 768px)").matches) setTimeout(() => taRef.current?.focus(), 50); // điện thoại: không bật bàn phím tự động
     sb.from("crm_conversations").update({ unread_count: 0 }).in("id", ids).then(() => {});
     const ch = sb.channel("thread-" + ids.join("_")).on("postgres_changes", { event: "INSERT", schema: "public", table: "crm_messages", filter: `conversation_id=in.(${ids.join(",")})` }, (p) => setMsgs((m) => (m.some((x) => x.id === (p.new as Message).id) ? m : [...m.filter((x) => !(x.id.startsWith("tmp-") && x.direction === "out" && x.text === (p.new as Message).text)), p.new as Message].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || "")))))
@@ -193,6 +204,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
       <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
+        {hasMore && <div className="text-center"><button onClick={loadOlder} disabled={loadingOld} className="btn text-xs px-3 py-1">{loadingOld ? "Đang tải…" : "Xem tin cũ hơn"}</button></div>}
         {msgs.map((m) => (
           <div key={m.id} className={cn("flex group items-center gap-1", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
@@ -200,6 +212,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" onLoad={() => { if (atBottom) jumpBottom(); }} /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[11px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
+              {m.direction === "out" && <div className="text-[10px] font-medium opacity-80 mb-0.5">{m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : (m as any).raw?.contact ? <ContactCard c={(m as any).raw.contact} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
