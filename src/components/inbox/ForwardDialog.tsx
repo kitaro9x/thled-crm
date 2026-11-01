@@ -17,7 +17,9 @@ export function ForwardDialog({ text, attachments, items, excludeId, onClose }: 
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const t = setTimeout(async () => {
-      let qq = supabaseBrowser().from("crm_v_conversations").select("*").neq("id", excludeId).in("kind", ["inbox", "group"]).order("last_message_at", { ascending: false }).limit(20);
+      let qq = supabaseBrowser().from("crm_v_conversations").select("*").in("kind", ["inbox", "group"]);
+      if (excludeId) qq = qq.neq("id", excludeId);
+      qq = qq.order("last_message_at", { ascending: false }).limit(20);
       if (q.trim()) qq = qq.or(`display_name.ilike.%${q.trim()}%,person_name.ilike.%${q.trim()}%,person_phone.ilike.%${q.trim()}%,meta->>alias.ilike.%${q.trim()}%`);
       const { data } = await qq; setList((data as Conversation[]) || []);
     }, 200); return () => clearTimeout(t);

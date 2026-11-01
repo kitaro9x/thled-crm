@@ -42,3 +42,6 @@ html.dark .rounded-2xl.bg-white { background-color:#1e293b !important; }
 .group-badge { @apply inline-flex items-center gap-0.5 align-middle rounded px-1 py-px text-[10px] font-medium; background: rgba(16,185,129,.12); color: #047857; }
 html.dark .group-badge { background: rgba(16,185,129,.18); color: #6ee7b7; }
 html.dark .ring-emerald-400 { --tw-ring-color: rgba(52,211,153,.55); }
+
+/* in đơn hàng: chỉ in tờ báo giá */
+@media print { aside, nav, .print\:hidden { display: none !important; } main { overflow: visible !important; } html.dark body, html.dark .card { background: #fff !important; color: #000 !important; } body { background: #fff !important; } }
