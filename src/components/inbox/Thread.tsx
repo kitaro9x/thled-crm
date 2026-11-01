@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -153,6 +153,16 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     const alias = v.trim() && v.trim() !== conv.display_name ? v.trim() : null;
     await sb.from("crm_conversations").update({ meta: { ...((conv as any).meta || {}), alias } }).eq("id", conv.id);
   };
+  // Tạo đơn hàng từ hội thoại: chưa có hồ sơ khách thì tạo nhanh rồi mở form đơn (kèm lịch hẹn)
+  const createOrder = async () => {
+    let pid = conv.customer_id;
+    if (!pid) {
+      const { data: p, error } = await sb.from("crm_customers").insert({ name: convName(conv), phone: conv.person_phone || null, avatar_url: conv.identity_avatar, source_origin: "manual", source_channel_id: conv.channel_id }).select("id").single();
+      if (error || !p) { alert("Không tạo được hồ sơ khách: " + error?.message); return; }
+      pid = p.id; await sb.from("crm_conversations").update({ customer_id: pid }).eq("id", conv.id); await sb.from("crm_identities").update({ customer_id: pid }).eq("id", conv.identity_id);
+    }
+    window.location.href = `/orders/new?person=${pid}&conv=${conv.id}`;
+  };
   const assign = async (id: string) => { await sb.from("crm_conversations").update({ assigned_to: id }).eq("id", conv.id); setShowAssign(false); };
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (atItems.length) {
@@ -193,6 +203,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <button className="btn px-2" title="Quan trọng" onClick={() => sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id)}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} /></button>
           <button className="btn px-2" title="Gắn nhãn" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); }}><Tag size={15} /></button>
           <button className="btn px-2" title="Giao cho" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); }}><UserPlus size={15} /></button>
+          {conv.kind !== "group" && <button className="btn px-2" title="Tạo đơn hàng + lịch hẹn cho khách này" onClick={createOrder}><ShoppingCart size={15} /></button>}
           <button className="btn px-2" title={conv.status === "open" ? "Đóng hội thoại" : "Mở lại"} onClick={() => sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id)}><Check size={15} /></button>
           {showLabels && <div className="absolute right-0 top-10 z-10 card p-2 w-56 max-h-72 overflow-auto shadow-lg"><div className="flex items-center justify-between text-xs text-slate-500 mb-1"><span>Gắn nhãn</span><button onClick={() => setShowLabels(false)} className="btn px-1.5 py-0.5"><X size={12} /></button></div>{labels.map((l) => <label key={l.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer"><input type="checkbox" checked={convLabels.includes(l.name)} onChange={() => toggleLabel(l.name)} /><span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />{l.name}</label>)}</div>}
           {showAssign && <div className="absolute right-0 top-10 z-10 card p-2 w-56 shadow-lg">{members.map((m) => <button key={m.id} onClick={() => assign(m.id)} className="block w-full text-left py-1.5 px-2 rounded hover:bg-slate-50 text-sm">{m.name}</button>)}</div>}
