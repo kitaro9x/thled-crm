@@ -76,6 +76,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   }, [list, group]);
   const curGroup = groups.find((g) => g.key === sel) || groups.find((g) => g.convs.some((c) => c.id === sel)) || null;
   const current = curGroup?.primary || convs.find((c) => c.id === sel) || null;
+  useEffect(() => { try { if (current?.id) window.history.replaceState(null, "", `/inbox?c=${current.id}`); } catch {} }, [current?.id]); // eslint-disable-line
   // mọi hội thoại của khách này (kể cả ngoài bộ lọc) để thread hiển thị đủ kênh
   const siblings = useMemo(() => current ? (group && current.customer_id ? convs.filter((c) => c.customer_id === current.customer_id) : [current]) : [], [convs, current, group]);
 
@@ -110,14 +111,14 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         <div className="flex-1 overflow-y-auto">
           {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
           {groups.map((g, gi) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
-            <button key={g.key} onClick={() => { setSel(g.key); setMobileView("thread"); }} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
+            <a key={g.key} href={`/inbox?c=${c.id}`} onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; /* Ctrl/⌘+click, chuột giữa → mở tab mới */ e.preventDefault(); setSel(g.key); setMobileView("thread"); }} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
               <div className={cn("relative", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={40} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={40} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2"><div className={cn("truncate", g.unread ? "font-semibold" : "font-medium")}>{c.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle group-badge"><Users size={10} />NHÓM</span>}{convName(c)}{g.convs.length > 1 && <span className="ml-1 text-[10px] text-slate-400">{g.convs.length} kênh</span>}</div><div className="text-[11px] text-slate-400 shrink-0">{ago(c.last_message_at)}</div></div>
                 <div className="flex items-center justify-between gap-2"><div className="truncate text-xs text-slate-500">{c.kind === "comment" && "💬 "}{c.kind === "group" && "👥 "}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[10px] px-1.5 min-w-[18px] text-center">{g.unread}</span>}</div>
                 <div className="flex gap-1 mt-1 flex-wrap">{c.person_phone && <span className="chip bg-emerald-50 text-emerald-700">📞 {c.person_phone}</span>}{c.labels?.slice(0, 2).map((l) => <span key={l} className="chip bg-slate-100 text-slate-600">{l}</span>)}{c.assignee_name && <span className="chip bg-blue-50 text-blue-700">{c.assignee_name}</span>}</div>
               </div>
-            </button>); })}
+            </a>); })}
         </div>
       </div>
       {/* cột 2: thread */}
