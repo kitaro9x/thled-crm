@@ -262,7 +262,14 @@ async function main() {
       }
       else if (mt === "chat.recommended") { // danh thiếp / liên hệ / link
         const t = c?.title || c?.description || "";
-        if (c?.action === "recommened.user" || c?.type === "recommened.user") {
+        if (c?.action === "recommened.calltime") {
+          // thẻ cuộc gọi Zalo: duration=0 → nhỡ; bubble thuộc về người gọi → in = khách gọi đến, out = mình gọi đi
+          let cp = null; try { cp = typeof c?.params === "string" ? JSON.parse(c.params) : c?.params; } catch {}
+          const dur = Number(cp?.duration || 0), missed = dur === 0, video = Number(cp?.calltype) === 1, incoming = !isSelf;
+          const mmss = `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")}`;
+          text = missed ? (incoming ? `📵 Cuộc gọi nhỡ${video ? " (video)" : ""}` : `📵 Gọi đi không bắt máy${video ? " (video)" : ""}`) : `${video ? "📹" : "📞"} Cuộc gọi ${video ? "video " : ""}${incoming ? "đến" : "đi"} · ${mmss}`;
+          type = "event"; extraRaw = { call: { missed, duration: dur, video, incoming } };
+        } else if (c?.action === "recommened.user" || c?.type === "recommened.user") {
           let cd = null; try { cd = typeof c?.description === "string" && c.description.startsWith("{") ? JSON.parse(c.description) : null; } catch {}
           const phone = cd?.phone || "";
           text = `👤 Danh thiếp: ${c?.title || ""}`; // không ghi SĐT vào text để CRM không tự tạo khách bằng số của người thứ ba
