@@ -175,7 +175,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const createOrder = async () => {
     let pid = conv.customer_id;
     if (!pid) {
-      const { data: p, error } = await sb.from("crm_customers").insert({ name: convName(conv), phone: conv.person_phone || null, avatar_url: conv.identity_avatar, source_origin: "manual", source_channel_id: conv.channel_id }).select("id").single();
+      // nhóm: hồ sơ khách mang tên nhóm (có thể sửa tên/SĐT sau ở CDP); 1-1: tên + SĐT đang có
+      const { data: p, error } = await sb.from("crm_customers").insert({ name: convName(conv), phone: conv.person_phone || null, avatar_url: conv.identity_avatar, source_origin: "manual", source_channel_id: conv.channel_id, ...(conv.kind === "group" ? { tags: ["Nhóm Zalo"] } : {}) }).select("id").single();
       if (error || !p) { alert("Không tạo được hồ sơ khách: " + error?.message); return; }
       pid = p.id; await sb.from("crm_conversations").update({ customer_id: pid }).eq("id", conv.id); await sb.from("crm_identities").update({ customer_id: pid }).eq("id", conv.identity_id);
     }
@@ -222,7 +223,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <button className="btn px-2" title="Quan trọng" onClick={() => sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id)}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} /></button>
           <button className="btn px-2" title="Gắn nhãn" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); }}><Tag size={15} /></button>
           <button className="btn px-2" title="Giao cho" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); }}><UserPlus size={15} /></button>
-          {conv.kind !== "group" && <button className="btn px-2" title="Tạo đơn hàng + lịch hẹn cho khách này" onClick={createOrder}><ShoppingCart size={15} /></button>}
+          <button className="btn px-2" title={conv.kind === "group" ? "Tạo đơn hàng + lịch hẹn cho nhóm này (hồ sơ khách mang tên nhóm)" : "Tạo đơn hàng + lịch hẹn cho khách này"} onClick={createOrder}><ShoppingCart size={15} /></button>
           <button className="btn px-2" title="Thư viện ảnh / video / file / link của hội thoại" onClick={() => setShowGallery(true)}><Images size={15} /></button>
           <a className="btn px-2 hidden md:inline-flex" title="Mở hội thoại này ở tab mới" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>
           <button className="btn px-2" title={conv.status === "open" ? "Đóng hội thoại" : "Mở lại"} onClick={() => sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id)}><Check size={15} /></button>
