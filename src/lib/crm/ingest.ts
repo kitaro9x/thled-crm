@@ -167,8 +167,9 @@ async function applyLeadSources(
       if (ch?.type === "fb_page" && cur && cur.name !== a.identity.display_name && (!cur.name || cur.name === cur.zalo || /^(Khách mới|0\d{9})$/.test(cur.name))) await db.from("crm_customers").update({ name: a.identity.display_name }).eq("id", personId);
       if (ch?.type === "zalo_personal" && cur) {
         const patch: Record<string, string> = {};
-        if (!cur.zalo) patch.zalo = a.identity.display_name;
-        if (!cur.name || /^(Khách mới|0\d{9})$/.test(cur.name)) patch.name = a.identity.display_name; // chưa có tên FB → dùng tên Zalo
+        const dn = a.identity.display_name;
+        if (dn && cur.zalo !== dn) patch.zalo = dn; // tên Zalo (ưu tiên tên gợi nhớ/danh bạ) đổi → cập nhật
+        if (dn && (!cur.name || cur.name === cur.zalo || /^(Khách mới|0\d{9})$/.test(cur.name))) patch.name = dn; // tên khách đang lấy từ Zalo → đi theo
         if (Object.keys(patch).length) await db.from("crm_customers").update(patch).eq("id", personId);
       }
     }

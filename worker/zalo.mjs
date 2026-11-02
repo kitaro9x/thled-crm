@@ -34,7 +34,7 @@ async function fetchAttachment(a) {
 const groupMembers = new Map(); // groupId -> [{id,name}]
 async function saveGroupMembers(api, gid, g) {
   try {
-    let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.zaloName || m.dName, avatar: m.avatar || null }));
+    let mems = (g?.currentMems || []).map((m) => ({ id: String(m.id), name: m.dName || m.zaloName, avatar: m.avatar || null }));
     if (!mems.length) {
       // Zalo thường trả memberIds rỗng, danh sách nằm ở memVerList dạng "uid_version"
       let ids = (g?.memberIds?.length ? g.memberIds : (g?.memVerList || []).map((x) => String(x).split("_")[0])).map(String).filter(Boolean);
@@ -44,7 +44,7 @@ async function saveGroupMembers(api, gid, g) {
         try {
           const info = await api.getUserInfo(chunk);
           for (const [k, u] of Object.entries({ ...(info?.unchanged_profiles || {}), ...(info?.changed_profiles || {}) })) {
-            const name = u?.zaloName || u?.displayName || u?.dName; if (name) mems.push({ id: String(u?.userId || k), name, avatar: u?.avatar || null });
+            const name = u?.displayName || u?.dName || u?.zaloName; if (name) mems.push({ id: String(u?.userId || k), name, avatar: u?.avatar || null });
           }
         } catch (e) { console.log("getUserInfo lỗi", e.message); }
         await sleep(rnd(300, 700));
@@ -191,7 +191,7 @@ async function main() {
     const { data: bad } = await sb.from("crm_identities").select("id,external_id,customer_id").eq("channel_id", ch.id).eq("display_name", name).neq("external_id", String(own));
     for (const b of bad || []) {
       const info = await api.getUserInfo(b.external_id).catch(() => null); const p = info?.changed_profiles?.[b.external_id];
-      const real = p?.zaloName || p?.displayName; if (!real) continue;
+      const real = p?.displayName || p?.zaloName; if (!real) continue;
       await sb.from("crm_identities").update({ display_name: real, avatar_url: p.avatar || null }).eq("id", b.id);
       if (b.customer_id) await sb.from("crm_customers").update({ name: real, zalo: real }).eq("id", b.customer_id).eq("name", name);
       console.log("Sửa tên:", b.external_id, "→", real); await sleep(500);
@@ -243,6 +243,29 @@ async function main() {
     } catch (e) { console.error("syncGroups", e.message); }
   }
   syncGroups(); setInterval(syncGroups, 6 * 3600000);
+  // cập nhật tên hiển thị theo tên gợi nhớ/danh bạ cho toàn bộ liên hệ (khởi động, theo lô để không bị Zalo soi)
+  async function syncNames() {
+    try {
+      const { data: ch } = await sb.from("crm_channels").select("id").eq("type", "zalo_personal").eq("external_id", String(own)).single();
+      const { data: ids } = await sb.from("crm_identities").select("id,external_id,display_name,customer_id").eq("channel_id", ch.id).neq("external_id", String(own)).limit(1500);
+      const list = (ids || []).filter((i) => /^\d{10,}$/.test(String(i.external_id)));
+      let changed = 0;
+      for (let i = 0; i < list.length; i += 20) {
+        const chunk = list.slice(i, i + 20);
+        const info = await api.getUserInfo(chunk.map((x) => String(x.external_id))).catch(() => null);
+        const profs = { ...(info?.unchanged_profiles || {}), ...(info?.changed_profiles || {}) };
+        for (const it of chunk) {
+          const p = profs[String(it.external_id)]; const nm = p?.displayName || p?.zaloName; if (!nm || nm === it.display_name) continue;
+          await sb.from("crm_identities").update({ display_name: nm }).eq("id", it.id);
+          if (it.customer_id) await sb.from("crm_customers").update({ zalo: nm }).eq("id", it.customer_id);
+          changed++;
+        }
+        await sleep(rnd(1200, 2000));
+      }
+      console.log("syncNames xong:", list.length, "liên hệ, đổi", changed);
+    } catch (e) { console.error("syncNames", e.message); }
+  }
+  setTimeout(syncNames, 60000);
 
   // 2. listener
   const groupNames = new Map();
@@ -341,7 +364,7 @@ async function main() {
         return;
       }
       // luôn tra hồ sơ của ĐỐI PHƯƠNG (khi mình gửi, d.dName là tên của mình → không dùng)
-      { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || (isSelf ? undefined : senderName); avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
+      { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.displayName || p.zaloName || (isSelf ? undefined : senderName); /* ưu tiên tên gợi nhớ/danh bạ, rồi tên Zalo thật */ avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
       await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, zaloLabels: labelByUid.get(String(uid)) || [], text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, zq: { cliMsgId: d.cliMsgId, uidFrom: d.uidFrom, ts: d.ts, ttl: d.ttl || 0, propertyExt: d.propertyExt || null }, ...(extraRaw || {}) } });
     } catch (e) { console.error("msg err", e.message); }
   });
@@ -410,7 +433,7 @@ async function main() {
           console.log("Đã kết bạn:", t.phone, t.zalo_name);
           if (t.after_accept_message) {
             await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User);
-            await recordOutgoing(own, t.zalo_uid, t.zalo_name || p.zaloName || p.displayName, t.after_accept_message);
+            await recordOutgoing(own, t.zalo_uid, t.zalo_name || p.displayName || p.zaloName, t.after_accept_message);
             await sleep(rnd(2000, 4000));
           }
         }
