@@ -247,6 +247,14 @@ async function main() {
       // Diễn giải nội dung theo loại tin của Zalo (giống hiển thị trên app)
       const c = d.content; const mt = d.msgType || ""; const attachments = []; let type = "text";
       let text = typeof c === "string" ? c : ""; let extraRaw = null;
+      // tin trả lời/trích dẫn (quote): lưu nội dung gốc để CRM hiện khối trích dẫn + nhảy tới tin gốc
+      if (d.quote && (d.quote.msg || d.quote.attach)) {
+        let at = null; try { at = typeof d.quote.attach === "string" && d.quote.attach ? JSON.parse(d.quote.attach) : d.quote.attach || null; } catch {}
+        const pick = (o, keys) => { for (const k of keys) if (o && typeof o[k] === "string" && /^https?:/.test(o[k])) return o[k]; return null; };
+        const thumb = pick(at, ["thumb", "thumbUrl", "thumbnail", "href", "url", "oriUrl", "normalUrl"]);
+        const qmsg = typeof d.quote.msg === "string" ? d.quote.msg : (at?.title || at?.description || "");
+        extraRaw = { quote: { msg: qmsg, thumb, kind: thumb ? (/\.(mp4|mov)/i.test(thumb) ? "video" : "image") : (at ? "file" : "text"), name: at?.title || at?.fileName || null, from: d.quote.fromD || null, msg_id: d.quote.globalMsgId ? String(d.quote.globalMsgId) : null, cli_id: d.quote.cliMsgId ? String(d.quote.cliMsgId) : null } };
+      }
       const dur = (ms) => { const s = Math.round(Number(ms || 0) / 1000); return `${Math.floor(s / 60)} phút ${s % 60} giây`; };
       if (mt === "chat.photo") { type = "image"; attachments.push({ type: "image", url: c?.href || c?.hd || c?.thumb }); text = c?.title || ""; }
       else if (mt === "chat.gif") { type = "image"; attachments.push({ type: "image", url: c?.href || c?.thumb }); text = ""; }
@@ -258,7 +266,7 @@ async function main() {
         let lp = null; try { lp = typeof c?.params === "string" ? JSON.parse(c.params) : c?.params; } catch {}
         const lat = Number(lp?.latitude), lng = Number(lp?.longitude);
         text = `📍 Vị trí: ${c?.title || c?.description || ""}`.trim() + (c?.description && c?.title ? `\n${c.description}` : "") + (lat && lng ? `\nhttps://maps.google.com/?q=${lat},${lng}` : "");
-        if (lat && lng) extraRaw = { location: { lat, lng, title: c?.title || "", address: c?.description || "" } };
+        if (lat && lng) extraRaw = { ...(extraRaw || {}), location: { lat, lng, title: c?.title || "", address: c?.description || "" } };
       }
       else if (mt === "chat.recommended") { // danh thiếp / liên hệ / link
         const t = c?.title || c?.description || "";
@@ -268,12 +276,12 @@ async function main() {
           const dur = Number(cp?.duration || 0), missed = dur === 0, video = Number(cp?.calltype) === 1, incoming = !isSelf;
           const mmss = `${Math.floor(dur / 60)}:${String(dur % 60).padStart(2, "0")}`;
           text = missed ? (incoming ? `📵 Cuộc gọi nhỡ${video ? " (video)" : ""}` : `📵 Gọi đi không bắt máy${video ? " (video)" : ""}`) : `${video ? "📹" : "📞"} Cuộc gọi ${video ? "video " : ""}${incoming ? "đến" : "đi"} · ${mmss}`;
-          type = "event"; extraRaw = { call: { missed, duration: dur, video, incoming } };
+          type = "event"; extraRaw = { ...(extraRaw || {}), call: { missed, duration: dur, video, incoming } };
         } else if (c?.action === "recommened.user" || c?.type === "recommened.user") {
           let cd = null; try { cd = typeof c?.description === "string" && c.description.startsWith("{") ? JSON.parse(c.description) : null; } catch {}
           const phone = cd?.phone || "";
           text = `👤 Danh thiếp: ${c?.title || ""}`; // không ghi SĐT vào text để CRM không tự tạo khách bằng số của người thứ ba
-          extraRaw = { contact: { name: c?.title || "", phone, avatar: c?.thumb || null, qr: cd?.qrCodeUrl || null, uid: String(c?.params || "") } };
+          extraRaw = { ...(extraRaw || {}), contact: { name: c?.title || "", phone, avatar: c?.thumb || null, qr: cd?.qrCodeUrl || null, uid: String(c?.params || "") } };
         } else text = t || "[Thẻ chia sẻ]";
       }
       else if (mt === "chat.link") { text = [c?.title, c?.href].filter(Boolean).join("\n") || "[Link]"; if (c?.thumb) attachments.push({ type: "link", url: c.href, thumb: c.thumb }); }
@@ -291,8 +299,8 @@ async function main() {
         text = (isBank ? "🏦 Tài khoản ngân hàng" : "🗂️ Thẻ thông tin") + (z.text && z.text !== "[Tài khoản ngân hàng]" ? "\n" + z.text : "") + (bank ? `\n${bank.bank_name ? bank.bank_name.toUpperCase() + " · " : ""}${bank.account || ""}${bank.holder ? " · " + bank.holder : ""}` : "");
         for (const u of z.images) attachments.push({ type: "image", url: u });
         if (attachments.length) type = "image";
-        if (bank) extraRaw = { bank, zinstant_sample: (z.body || "").slice(0, 1500) };
-        else if (isBank) extraRaw = { zinstant_sample: (z.body || "").slice(0, 3000) };
+        if (bank) extraRaw = { ...(extraRaw || {}), bank, zinstant_sample: (z.body || "").slice(0, 1500) };
+        else if (isBank) extraRaw = { ...(extraRaw || {}), zinstant_sample: (z.body || "").slice(0, 3000) };
       }
       else if (typeof c === "object" && c) {
         // bubble đặc biệt (cuộc gọi, poll, nhắc hẹn…): c.title/description, hoặc params JSON
