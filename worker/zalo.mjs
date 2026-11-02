@@ -74,10 +74,17 @@ async function buildMentions(api, gid, text) {
   }
   return out;
 }
-async function zaloSend(api, uid, text, attachments, ttype = ThreadType.User) {
+async function zaloSend(api, uid, text, attachments, ttype = ThreadType.User, quote = null) {
   const atts = attachments || [];
   const mentions = ttype === ThreadType.Group ? await buildMentions(api, uid, text) : [];
+  // quote thật của Zalo cần dữ liệu tin gốc (lưu ở raw.zq khi nhận); thiếu → ghép dòng «…» vào chữ
+  let zquote = null;
+  if (quote) {
+    if (quote.zq?.cliMsgId && quote.msg_id) zquote = { content: quote.z_content ?? quote.msg ?? "", msgType: quote.z_msgType || "webchat", propertyExt: quote.zq.propertyExt || undefined, uidFrom: String(quote.zq.uidFrom || ""), msgId: String(quote.msg_id), cliMsgId: String(quote.zq.cliMsgId), ts: String(quote.zq.ts || ""), ttl: quote.zq.ttl || 0 };
+    else text = `↩ «${String(quote.msg || (quote.kind === "image" ? "Hình ảnh" : "Tệp")).slice(0, 80)}»\n${text || ""}`;
+  }
   if (!atts.length) {
+    if (zquote) { try { return await api.sendMessage({ msg: text || "", mentions, quote: zquote }, uid, ttype); } catch (e) { console.error("quote send fail, fallback:", e.message); text = `↩ «${String(quote.msg || "").slice(0, 80)}»\n${text || ""}`; } }
     if (mentions.length) return api.sendMessage({ msg: text, mentions }, uid, ttype);
     // có link → gửi dạng thẻ link (có ảnh/tiêu đề) như app Zalo
     const link = (text || "").match(/https?:\/\/[^\s<>"']+/i)?.[0];
@@ -87,7 +94,7 @@ async function zaloSend(api, uid, text, attachments, ttype = ThreadType.User) {
   const videos = atts.filter((a) => a.type === "video"); const others = atts.filter((a) => a.type !== "video");
   if (others.length) {
     const files = []; for (const a of others) files.push(await fetchAttachment(a));
-    await api.sendMessage({ msg: text || "", attachments: files, mentions }, uid, ttype);
+    await api.sendMessage({ msg: text || "", attachments: files, mentions, ...(zquote ? { quote: zquote } : {}) }, uid, ttype);
   } else if (text) await api.sendMessage(text, uid, ttype);
   for (const v of videos) {
     try { await api.sendVideo({ msg: "", videoUrl: v.url, thumbnailUrl: v.thumb || v.url }, uid, ttype); }
@@ -330,12 +337,12 @@ async function main() {
         // nhóm: hội thoại = nhóm, tên người gửi ghi vào từng tin
         let gname = groupNames.get(uid);
         if (!gname) { const gi = await api.getGroupInfo(uid).catch(() => null); const g = gi?.gridInfoMap?.[uid]; gname = g?.name || "Nhóm Zalo"; avatar = g?.avt || g?.fullAvt; if (/default|group_default|avt_default/i.test(avatar || "")) avatar = null; groupNames.set(uid, gname); await saveGroupMembers(api, uid, g); }
-        await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c, ...(extraRaw || {}) } });
+        await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName: gname, senderAvatar: avatar, text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", kind: "group", messageSenderName: isSelf ? null : (d.dName || null), raw: { msgType: mt, content: c, zq: { cliMsgId: d.cliMsgId, uidFrom: d.uidFrom, ts: d.ts, ttl: d.ttl || 0, propertyExt: d.propertyExt || null }, ...(extraRaw || {}) } });
         return;
       }
       // luôn tra hồ sơ của ĐỐI PHƯƠNG (khi mình gửi, d.dName là tên của mình → không dùng)
       { const info = await api.getUserInfo(uid).catch(() => null); const p = info?.changed_profiles?.[uid]; if (p) { senderName = p.zaloName || p.displayName || (isSelf ? undefined : senderName); avatar = p.avatar; phone = p.phoneNumber; } else if (isSelf) senderName = undefined; }
-      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, zaloLabels: labelByUid.get(String(uid)) || [], text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, ...(extraRaw || {}) } });
+      await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, zaloLabels: labelByUid.get(String(uid)) || [], text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, zq: { cliMsgId: d.cliMsgId, uidFrom: d.uidFrom, ts: d.ts, ttl: d.ttl || 0, propertyExt: d.propertyExt || null }, ...(extraRaw || {}) } });
     } catch (e) { console.error("msg err", e.message); }
   });
   api.listener.start();
@@ -357,7 +364,7 @@ async function main() {
       for (const o of out || []) {
         if (o.crm_channels?.type !== "zalo_personal") continue;
         try {
-          await zaloSend(api, o.external_id, o.text, o.attachments, o.crm_conversations?.kind === "group" ? ThreadType.Group : ThreadType.User);
+          await zaloSend(api, o.external_id, o.text, o.attachments, o.crm_conversations?.kind === "group" ? ThreadType.Group : ThreadType.User, o.quote || null);
           await sb.from("crm_outbox").update({ status: "sent", sent_at: new Date().toISOString() }).eq("id", o.id);
           await sb.from("crm_messages").update({ status: "sent" }).eq("conversation_id", o.conversation_id).eq("status", "queued");
           if (o.source !== "manual") await sb.from("crm_messages").insert({ conversation_id: o.conversation_id, direction: "out", type: "text", text: o.text, attachments: o.attachments, status: "sent" });
