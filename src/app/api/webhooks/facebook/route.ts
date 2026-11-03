@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
         const metaAi = isEcho && echoApp && echoApp !== String(process.env.FB_APP_ID || "");
         const res = await ingestMessage(db, {
           channelType: "fb_page", channelExternalId: pageId, senderExternalId: senderId,
-          senderName: profile?.name, senderAvatar: profile?.profile_pic, messageSenderName: metaAi ? "🤖 AI Meta" : undefined,
+          senderName: profile?.name, senderAvatar: profile?.profile_pic, messageSenderName: metaAi ? "Business Suite" : undefined,
           text: m.message.text, type: atts.length ? atts[0].type : m.message.sticker_id ? "sticker" : "text", attachments: atts,
           externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: { ...m, meta_ai: metaAi || undefined },
           referral: referral ? { source: referral.source, type: referral.type, ad_id: referral.ad_id, ref: referral.ref, ads_context: referral.ads_context_data } : undefined,
