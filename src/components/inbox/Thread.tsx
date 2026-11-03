@@ -25,6 +25,13 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [target, setTarget] = useState<Conversation>(() => [...all].sort((a, b) => (b.last_inbound_at || b.last_message_at || "").localeCompare(a.last_inbound_at || a.last_message_at || ""))[0] || conv);
   const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[]; items?: { text?: string | null; attachments?: any[] }[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
   const [showGallery, setShowGallery] = useState(false);
+  const [handoverBusy, setHandoverBusy] = useState(false); const [handoverMsg, setHandoverMsg] = useState("");
+  const handover = async (action: "take" | "release") => {
+    setHandoverBusy(true); setHandoverMsg("");
+    const r = await fetch(`/api/channels/${conv.channel_id}/handover`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: conv.id, action }) });
+    const j = await r.json(); setHandoverBusy(false);
+    if (!r.ok) setHandoverMsg("Meta từ chối: " + (j.error || "") + (j.code ? ` (mã ${j.code})` : "") + " — kiểm tra Cài đặt Handover của Page (xem hướng dẫn).");
+  };
   const [lb, setLb] = useState<number | null>(null); // lightbox: chỉ số trong danh sách ảnh của hội thoại
   const [replyTo, setReplyTo] = useState<Message | null>(null); // trích dẫn tin khi trả lời
   useEffect(() => { setReplyTo(null); }, [conv.id]);
@@ -238,6 +245,12 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
       {showGallery && <MediaGallery ids={ids} onClose={() => setShowGallery(false)} />}
       {lb !== null && allImages.length > 0 && <Lightbox images={allImages} index={lb} onClose={() => setLb(null)} />}
+      {(() => { const ai = (conv as any).meta?.ai_meta; if (!ai?.last_at || conv.channel_type !== "fb_page") return null; const fresh = Date.now() - new Date(ai.last_at).getTime() < 48 * 3600000; if (!fresh) return null; return (
+        <div className={cn("shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs border-b", ai.taken_over ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-violet-50 border-violet-100 text-violet-800")}>
+          <span>{ai.taken_over ? "✅ Nhân viên đang giữ hội thoại — AI Meta tạm ngưng." : "🤖 Tác nhân AI của Meta (Business Suite) đang tự trả lời khách này."}</span>
+          <button className="btn px-2 py-1 text-xs ml-auto" disabled={handoverBusy} onClick={() => handover(ai.taken_over ? "release" : "take")}>{handoverBusy ? "Đang xử lý…" : ai.taken_over ? "Trả lại cho AI Meta" : "Tôi tự trả lời"}</button>
+          {handoverMsg && <span className="w-full text-red-600">{handoverMsg}</span>}
+        </div>); })()}
       {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
       {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
@@ -255,7 +268,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
                   {q.thumb && <img src={q.thumb} alt="" className="w-10 h-10 rounded object-cover shrink-0" />}
                   <div className="min-w-0"><div className="font-semibold truncate">{q.from || "Tin nhắn"}</div><div className="truncate opacity-80">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.kind === "video" ? "[Video]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
                 </button>); })()}
-              {m.direction === "out" && <div className="text-[10px] font-medium opacity-80 mb-0.5">{m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
+              {m.direction === "out" && <div className={cn("text-[10px] font-medium opacity-80 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 AI Meta (Business Suite) trả lời" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : (m as any).raw?.contact ? <ContactCard c={(m as any).raw.contact} /> : (m as any).raw?.call ? <CallCard call={(m as any).raw.call} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>

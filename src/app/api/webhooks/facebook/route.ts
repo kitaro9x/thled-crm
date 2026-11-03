@@ -52,13 +52,29 @@ export async function POST(req: NextRequest) {
           if (!idn?.display_name || (!isEcho && !idn?.avatar_url)) profile = await fbGetProfile(pageToken, senderId, pageId);
         }
         const atts = (m.message.attachments || []).map((a: any) => ({ type: a.type === "image" ? "image" : a.type === "video" ? "video" : a.type === "audio" ? "audio" : "file", url: a.payload?.url, name: a.payload?.title }));
-        await ingestMessage(db, {
+        // echo từ app khác app CRM (Business Suite / tác nhân AI của Meta / trả lời tự động) → đánh dấu để CRM hiện "AI Meta đang trả lời"
+        const echoApp = isEcho ? String(m.message.app_id || "") : "";
+        const metaAi = isEcho && echoApp && echoApp !== String(process.env.FB_APP_ID || "");
+        const res = await ingestMessage(db, {
           channelType: "fb_page", channelExternalId: pageId, senderExternalId: senderId,
-          senderName: profile?.name, senderAvatar: profile?.profile_pic,
+          senderName: profile?.name, senderAvatar: profile?.profile_pic, messageSenderName: metaAi ? "🤖 AI Meta" : undefined,
           text: m.message.text, type: atts.length ? atts[0].type : m.message.sticker_id ? "sticker" : "text", attachments: atts,
-          externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: m,
+          externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: { ...m, meta_ai: metaAi || undefined },
           referral: referral ? { source: referral.source, type: referral.type, ad_id: referral.ad_id, ref: referral.ref, ads_context: referral.ads_context_data } : undefined,
         });
+        if (metaAi && res?.conversationId) {
+          const { data: cv } = await db.from("crm_conversations").select("meta").eq("id", res.conversationId).single();
+          await db.from("crm_conversations").update({ meta: { ...((cv?.meta as any) || {}), ai_meta: { last_at: new Date(m.timestamp).toISOString(), app_id: echoApp, taken_over: false } } }).eq("id", res.conversationId);
+        }
+      }
+      // --- Handover: Meta báo app nào đang giữ quyền hội thoại ---
+      for (const m of entry.messaging || []) {
+        const h = m.pass_thread_control || m.take_thread_control;
+        if (!h) continue;
+        const psid = m.sender?.id; const { data: idn } = await db.from("crm_identities").select("id").eq("channel_id", channel!.id).eq("external_id", psid).maybeSingle();
+        if (!idn) continue;
+        const { data: cv } = await db.from("crm_conversations").select("id,meta").eq("identity_id", idn.id).eq("kind", "inbox").maybeSingle();
+        if (cv) await db.from("crm_conversations").update({ meta: { ...((cv.meta as any) || {}), ai_meta: { ...(((cv.meta as any) || {}).ai_meta || {}), taken_over: !!m.pass_thread_control && String(h.new_owner_app_id || "") === String(process.env.FB_APP_ID || ""), handover_at: new Date().toISOString() } } }).eq("id", cv.id);
       }
 
       // --- Bình luận (feed) ---
