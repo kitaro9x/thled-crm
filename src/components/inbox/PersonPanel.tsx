@@ -70,9 +70,14 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
     await sb.from("crm_zalo_friend_tasks").insert({ customer_id: person.id, phone: person.phone, source_conversation_id: conv.id, greeting: `Xin chào ${person.name || ""}, em bên showroom THLED Đồng Nai, kết bạn để gửi báo giá và tư vấn ạ.`.slice(0, 150) });
     load();
   };
+  const [aiBusy, setAiBusy] = useState(false); const [ai, setAi] = useState<{ summary?: string; emotion?: string; stage?: string; product_interest?: string | null; error?: string } | null>(null);
+  useEffect(() => { setAi(conv.ai_summary ? { summary: conv.ai_summary, emotion: conv.emotion || undefined } : null); }, [conv.id, conv.ai_summary, conv.emotion]);
   const summarize = async () => {
+    setAiBusy(true); setAi((a) => ({ ...(a || {}), error: undefined }));
     const r = await fetch("/api/ai/summarize", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: conv.id }) });
-    if (!r.ok) alert("Chưa cấu hình ANTHROPIC_API_KEY");
+    const j = await r.json(); setAiBusy(false);
+    if (!r.ok) { setAi({ error: j.error || "Tóm tắt thất bại" }); return; }
+    setAi(j); load();
   };
 
   return (
@@ -114,7 +119,13 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
             {orders.map((o) => <Link key={o.id} href={`/orders/${o.id}`} className="flex justify-between text-xs py-1"><span>{o.code}</span><span>{money(o.grand_total)}</span></Link>)}
           </div>
 
-          <button className="btn w-full justify-center" onClick={summarize}><Sparkles size={14} /> AI tóm tắt hội thoại</button>
+          <button className="btn w-full justify-center" onClick={summarize} disabled={aiBusy}><Sparkles size={14} /> {aiBusy ? "AI đang đọc hội thoại…" : ai?.summary ? "AI tóm tắt lại" : "AI tóm tắt hội thoại"}</button>
+          {ai?.error && <div className="text-xs text-red-600 mt-1">{ai.error}</div>}
+          {ai?.summary && <div className="mt-2 rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-slate-700 whitespace-pre-wrap">
+            <div className="flex items-center gap-1 font-semibold text-violet-700 mb-1"><Sparkles size={12} /> Tóm tắt AI{ai.stage && <span className="chip bg-violet-100 text-violet-700 ml-auto">{ai.stage}</span>}</div>
+            {ai.summary}
+            {ai.product_interest && <div className="mt-1 text-slate-500">Quan tâm: {ai.product_interest}</div>}
+          </div>}
         </div>
       )}
     </div>
