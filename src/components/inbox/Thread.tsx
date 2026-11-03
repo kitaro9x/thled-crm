@@ -12,6 +12,7 @@ import { LocationCard } from "./LocationCard";
 import { ContactCard } from "./ContactCard";
 import { CallCard } from "./CallCard";
 import { MediaGallery } from "./MediaGallery";
+import { Lightbox } from "./Lightbox";
 
 export function Thread({ conv, siblings, labels, members, knowledge }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
   const sb = supabaseBrowser();
@@ -24,6 +25,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [target, setTarget] = useState<Conversation>(() => [...all].sort((a, b) => (b.last_inbound_at || b.last_message_at || "").localeCompare(a.last_inbound_at || a.last_message_at || ""))[0] || conv);
   const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[]; items?: { text?: string | null; attachments?: any[] }[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
   const [showGallery, setShowGallery] = useState(false);
+  const [lb, setLb] = useState<number | null>(null); // lightbox: chỉ số trong danh sách ảnh của hội thoại
   const [replyTo, setReplyTo] = useState<Message | null>(null); // trích dẫn tin khi trả lời
   useEffect(() => { setReplyTo(null); }, [conv.id]);
   const quoteOf = (m: Message) => { const a0 = m.attachments?.[0]; return { msg: m.text || "", thumb: a0?.type === "image" ? a0.url : null, kind: a0 ? a0.type : "text", name: a0?.name || null, from: m.direction === "out" ? "Mình" : ((m as any).sender_name || convName(conv)), msg_id: m.external_msg_id || null }; };
@@ -31,6 +33,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const togglePick = (id: string) => setPicked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   useEffect(() => { setPicked(new Set()); }, [conv.id]);
   const [msgs, setMsgs] = useState<Message[]>([]);
+  const allImages = msgs.flatMap((x) => (x.attachments || []).filter((a) => a.type === "image").map((a) => ({ url: a.url, caption: `${x.direction === "out" ? "Mình" : ((x as any).sender_name || "Khách")} · ${dt(x.sent_at)}` })));
   const PAGE = 200; const [hasMore, setHasMore] = useState(false); const [loadingOld, setLoadingOld] = useState(false);
   const loadOlder = async () => {
     const oldest = msgs[0]?.sent_at; if (!oldest || loadingOld) return; setLoadingOld(true);
@@ -234,6 +237,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       {convLabels.length > 0 && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}</div>}
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
       {showGallery && <MediaGallery ids={ids} onClose={() => setShowGallery(false)} />}
+      {lb !== null && allImages.length > 0 && <Lightbox images={allImages} index={lb} onClose={() => setLb(null)} />}
       {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
       {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
@@ -244,7 +248,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && renderActions(m)}
             <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
-              {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <a key={i} href={a.url} target="_blank"><img src={a.url} alt="" className="rounded-lg max-h-60 mb-1" onLoad={() => { if (atBottom) jumpBottom(); }} /></a> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
+              {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <img key={i} src={a.url} alt="" className="rounded-lg max-h-60 mb-1 cursor-zoom-in hover:opacity-95" onLoad={() => { if (atBottom) jumpBottom(); }} onClick={() => { const k = allImages.findIndex((x) => x.url === a.url); setLb(k >= 0 ? k : 0); }} /> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[11px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
               {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const target = q.msg_id ? msgs.find((x) => x.external_msg_id === q.msg_id) : null; return (
                 <button onClick={() => { if (!target) return; const el = document.getElementById("msg-" + target.id); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("ring-2", "ring-amber-400"); setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 1800); } }} title={target ? "Nhảy tới tin gốc" : "Tin gốc không nằm trong phần đã tải"} className={cn("mb-1.5 w-full text-left flex gap-2 items-center rounded-md border-l-4 px-2 py-1.5 text-xs", m.direction === "out" ? "bg-black/15 border-white/60 text-white/90" : "bg-slate-100 border-blue-500 text-slate-700", target && "cursor-pointer hover:opacity-90")}>
