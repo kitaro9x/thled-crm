@@ -34,8 +34,9 @@ export async function POST(req: NextRequest) {
       const { data: channel } = await db.from("crm_channels").select("id,credentials").eq("type", "fb_page").eq("external_id", pageId).single();
       const pageToken: string | undefined = channel?.credentials?.page_access_token;
 
-      // --- Messenger ---
-      for (const m of entry.messaging || []) {
+      // --- Messenger --- (messaging: app đang giữ quyền hội thoại; standby: app khác (Business Suite / AI Meta) đang giữ → CRM vẫn ghi nhận, chỉ xem)
+      const events = [...(entry.messaging || []).map((m: any) => ({ ...m, _standby: false })), ...(entry.standby || []).map((m: any) => ({ ...m, _standby: true }))];
+      for (const m of events) {
         const isEcho = !!m.message?.is_echo;
         const senderId = isEcho ? m.recipient.id : m.sender.id;
         if (!m.message) continue; // bỏ qua delivery/read
@@ -54,17 +55,18 @@ export async function POST(req: NextRequest) {
         const atts = (m.message.attachments || []).map((a: any) => ({ type: a.type === "image" ? "image" : a.type === "video" ? "video" : a.type === "audio" ? "audio" : "file", url: a.payload?.url, name: a.payload?.title }));
         // echo từ app khác app CRM (Business Suite / tác nhân AI của Meta / trả lời tự động) → đánh dấu để CRM hiện "AI Meta đang trả lời"
         const echoApp = isEcho ? String(m.message.app_id || "") : "";
-        const metaAi = isEcho && echoApp && echoApp !== String(process.env.FB_APP_ID || "");
+        const metaAi = (isEcho && echoApp && echoApp !== String(process.env.FB_APP_ID || "")) || (isEcho && m._standby);
         const res = await ingestMessage(db, {
           channelType: "fb_page", channelExternalId: pageId, senderExternalId: senderId,
           senderName: profile?.name, senderAvatar: profile?.profile_pic, messageSenderName: metaAi ? "Business Suite" : undefined,
           text: m.message.text, type: atts.length ? atts[0].type : m.message.sticker_id ? "sticker" : "text", attachments: atts,
-          externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: { ...m, meta_ai: metaAi || undefined },
+          externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: { ...m, meta_ai: metaAi || undefined, standby: m._standby || undefined },
           referral: referral ? { source: referral.source, type: referral.type, ad_id: referral.ad_id, ref: referral.ref, ads_context: referral.ads_context_data } : undefined,
         });
-        if (metaAi && res?.conversationId) {
+        if ((metaAi || m._standby) && res?.conversationId) {
           const { data: cv } = await db.from("crm_conversations").select("meta").eq("id", res.conversationId).single();
-          await db.from("crm_conversations").update({ meta: { ...((cv?.meta as any) || {}), ai_meta: { last_at: new Date(m.timestamp).toISOString(), app_id: echoApp, taken_over: false } } }).eq("id", res.conversationId);
+          const prevAi = ((cv?.meta as any) || {}).ai_meta || {};
+          await db.from("crm_conversations").update({ meta: { ...((cv?.meta as any) || {}), ai_meta: { ...prevAi, last_at: metaAi ? new Date(m.timestamp).toISOString() : prevAi.last_at, app_id: echoApp || prevAi.app_id, taken_over: false, standby: m._standby || false, standby_at: m._standby ? new Date().toISOString() : prevAi.standby_at } } }).eq("id", res.conversationId);
         }
       }
       // --- Handover: Meta báo app nào đang giữ quyền hội thoại ---

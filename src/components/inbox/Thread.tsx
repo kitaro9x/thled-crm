@@ -245,9 +245,9 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
       {showGallery && <MediaGallery ids={ids} onClose={() => setShowGallery(false)} />}
       {lb !== null && allImages.length > 0 && <Lightbox images={allImages} index={lb} onClose={() => setLb(null)} />}
-      {(() => { const ai = (conv as any).meta?.ai_meta; if (!ai?.last_at || conv.channel_type !== "fb_page") return null; const fresh = Date.now() - new Date(ai.last_at).getTime() < 48 * 3600000; if (!fresh) return null; return (
+      {(() => { const ai = (conv as any).meta?.ai_meta; if (conv.channel_type !== "fb_page" || !ai) return null; const ref = ai.standby ? ai.standby_at : ai.last_at; if (!ref) return null; const fresh = Date.now() - new Date(ref).getTime() < 48 * 3600000; if (!fresh && !ai.standby) return null; return (
         <div className={cn("shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs border-b", ai.taken_over ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-violet-50 border-violet-100 text-violet-800")}>
-          <span>{ai.taken_over ? "✅ Nhân viên đang giữ hội thoại — AI Meta tạm ngưng." : "🤖 Hội thoại này đang được trả lời từ Business Suite (tác nhân AI của Meta hoặc người dùng app Messenger/Business Suite)."}</span>
+          <span>{ai.taken_over ? "✅ Nhân viên đang giữ hội thoại — AI Meta tạm ngưng." : (ai.standby ? "🤖 Business Suite / AI Meta đang giữ quyền hội thoại này — CRM chỉ đang theo dõi. Bấm để giành quyền và tự trả lời." : "🤖 Hội thoại này đang được trả lời từ Business Suite (tác nhân AI của Meta hoặc người dùng app Messenger/Business Suite).")}</span>
           <button className="btn px-2 py-1 text-xs ml-auto" disabled={handoverBusy} onClick={() => handover(ai.taken_over ? "release" : "take")}>{handoverBusy ? "Đang xử lý…" : ai.taken_over ? "Trả lại cho AI Meta" : "Tôi tự trả lời"}</button>
           {handoverMsg && <span className="w-full text-red-600">{handoverMsg}</span>}
         </div>); })()}

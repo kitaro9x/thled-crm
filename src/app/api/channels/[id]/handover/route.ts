@@ -16,8 +16,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const url = action === "release" ? `${GRAPH}/me/pass_thread_control` : `${GRAPH}/me/take_thread_control`;
   const body: any = { recipient: { id: psid }, metadata: action === "release" ? "THLED CRM trả lại cho Business Suite" : "THLED CRM nhân viên tự trả lời" };
   if (action === "release") body.target_app_id = META_INBOX_APP;
-  const r = await fetch(`${url}?access_token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const j = await r.json();
+  let r = await fetch(`${url}?access_token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  let j = await r.json();
+  if ((!r.ok || j.error) && action !== "release") {
+    // không phải Primary Receiver → xin quyền (request_thread_control); Page Inbox là primary thường tự cấp
+    r = await fetch(`${GRAPH}/me/request_thread_control?access_token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, metadata: "THLED CRM xin quyền trả lời" }) });
+    j = await r.json();
+  }
   if (!r.ok || j.error) return NextResponse.json({ error: j.error?.message || "Meta từ chối", code: j.error?.code, detail: j.error }, { status: 400 });
   const meta = ((cv?.meta as any) || {}); meta.ai_meta = { ...(meta.ai_meta || {}), taken_over: action !== "release", handover_at: new Date().toISOString(), by: user.id };
   await db.from("crm_conversations").update({ meta }).eq("id", conversation_id);

@@ -41,9 +41,24 @@ export async function POST(req: NextRequest) {
     try {
       const token = channel.credentials?.page_access_token;
       let lastId: string | undefined;
-      if (text) { const res = await fbSendMessage(token, conv.external_id, text); lastId = res.message_id; }
+      const sendOnce = async (t?: string, url?: string, type?: any) => fbSendMessage(token, conv.external_id, t, url, undefined, type);
+      const sendRetry = async (t?: string, url?: string, type?: any) => {
+        try { return await sendOnce(t, url, type); }
+        catch (e: any) {
+          if (!/thread control|2018300|not the thread owner|standby/i.test(String(e?.message))) throw e;
+          // app khác (Business Suite / AI Meta) đang giữ hội thoại → giành/xin quyền rồi gửi lại
+          const G = "https://graph.facebook.com/v21.0";
+          for (const ep of ["take_thread_control", "request_thread_control"]) {
+            const rr = await fetch(`${G}/me/${ep}?access_token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ recipient: { id: conv.external_id }, metadata: "THLED CRM nhân viên trả lời" }) });
+            if (rr.ok) break;
+          }
+          await db.from("crm_conversations").update({ meta: { ...(conv.meta || {}), ai_meta: { ...((conv.meta || {}).ai_meta || {}), taken_over: true, standby: false, handover_at: new Date().toISOString() } } }).eq("id", conversation_id);
+          return await sendOnce(t, url, type);
+        }
+      };
+      if (text) { const res = await sendRetry(text); lastId = res.message_id; }
       for (const a of attachments as { type: string; url: string; name?: string }[]) {
-        const res = await fbSendMessage(token, conv.external_id, undefined, a.url, undefined, (["image", "video", "audio"].includes(a.type) ? a.type : "file") as any);
+        const res = await sendRetry(undefined, a.url, (["image", "video", "audio"].includes(a.type) ? a.type : "file") as any);
         lastId = res.message_id;
       }
       await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text: text || null, attachments, external_msg_id: lastId, sender_member_id: user.id, status: "sent", raw: quote ? { quote: { msg: quote.msg, thumb: quote.thumb, kind: quote.kind, name: quote.name, from: quote.from, msg_id: quote.msg_id } } : null });
