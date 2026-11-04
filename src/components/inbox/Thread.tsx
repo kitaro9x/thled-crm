@@ -314,7 +314,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
             </div>}
           </div>
           <button className="btn px-2" title="Đính kèm ảnh / video / PDF" onClick={() => fileRef.current?.click()}><Paperclip size={14} /></button>
-          <label className="btn px-2 text-xs" title="Hẹn giờ gửi"><Clock size={14} /><input type="datetime-local" className="ml-1 text-xs outline-none" value={schedule} onChange={(e) => setSchedule(e.target.value)} /></label>
+          {/* hẹn giờ gửi: ẩn theo yêu cầu (hay bấm nhầm); logic gửi theo lịch vẫn giữ nguyên */}
           <button className="btn btn-primary ml-auto" onClick={send} disabled={sending || (!text.trim() && !files.length)}><Send size={14} /> {uploading ? "Đang tải lên…" : schedule ? "Hẹn gửi" : "Gửi"}</button>
         </div>
       </div>
