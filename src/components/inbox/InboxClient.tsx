@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { GroupAvatar } from "@/components/GroupAvatar";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { ago, cn, convName } from "@/lib/utils";
+import { labelTone } from "@/lib/label-tone";
 import { Thread } from "./Thread";
 import { PersonPanel } from "./PersonPanel";
 
@@ -98,7 +99,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
-          <div className="flex gap-1 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("chip border", qf === x.k ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200")}>{x.l}</button>)}</div>
+          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}</div>
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
               <select className="input" value={f.channel || ""} onChange={(e) => setF({ ...f, channel: e.target.value || undefined })}><option value="">Nguồn hội thoại</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
@@ -111,12 +112,16 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         <div className="flex-1 overflow-y-auto">
           {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
           {groups.map((g, gi) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
-            <a key={g.key} href={`/inbox?c=${c.id}`} onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; /* Ctrl/⌘+click, chuột giữa → mở tab mới */ e.preventDefault(); setSel(g.key); setMobileView("thread"); }} className={cn("w-full text-left flex gap-2 px-3 py-2.5 border-b border-slate-50 hover:bg-slate-50", sel === g.key && "bg-blue-50", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
-              <div className={cn("relative", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={40} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={40} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
+            <a key={g.key} href={`/inbox?c=${c.id}`} onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; /* Ctrl/⌘+click, chuột giữa → mở tab mới */ e.preventDefault(); setSel(g.key); setMobileView("thread"); }} className={cn("conv-row", sel === g.key && "sel", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
+              <div className={cn("relative shrink-0 self-start mt-0.5", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={42} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={42} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2"><div className={cn("truncate", g.unread ? "font-semibold" : "font-medium")}>{c.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle group-badge"><Users size={10} />NHÓM</span>}{convName(c)}{g.convs.length > 1 && <span className="ml-1 text-[10px] text-slate-400">{g.convs.length} kênh</span>}</div><div className="text-[11px] text-slate-400 shrink-0">{ago(c.last_message_at)}</div></div>
-                <div className="flex items-center justify-between gap-2"><div className={cn("truncate text-xs", (c.last_message_text || "").startsWith("📵") ? "text-red-600 font-medium" : "text-slate-500")}>{c.kind === "comment" && "💬 "}{c.kind === "group" && "👥 "}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[10px] px-1.5 min-w-[18px] text-center">{g.unread}</span>}</div>
-                <div className="flex gap-1 mt-1 flex-wrap">{c.person_phone && <span className="chip bg-emerald-50 text-emerald-700">📞 {c.person_phone}</span>}{c.labels?.slice(0, 2).map((l) => <span key={l} className="chip bg-slate-100 text-slate-600">{l}</span>)}{c.assignee_name && <span className="chip bg-blue-50 text-blue-700">{c.assignee_name}</span>}</div>
+                <div className="flex items-center gap-2">
+                  {g.unread > 0 && <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" title="Chưa đọc" />}
+                  <div className={cn("truncate text-[14px] leading-5 flex-1", g.unread ? "font-semibold" : "font-medium")}>{c.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle group-badge"><Users size={10} />NHÓM</span>}{convName(c)}{g.convs.length > 1 && <span className="ml-1 text-[11px] font-normal text-slate-400">{g.convs.length} kênh</span>}</div>
+                  <div className={cn("text-[12px] shrink-0 tabular-nums", g.unread ? "text-blue-600 font-medium" : "text-slate-400")}>{ago(c.last_message_at)}</div>
+                </div>
+                <div className="flex items-center gap-2 mt-0.5"><div className={cn("truncate text-[13px] leading-5 flex-1", (c.last_message_text || "").startsWith("📵") ? "text-red-600 font-medium" : g.unread ? "text-slate-700" : "text-slate-500")}>{c.kind === "comment" && <MessageSquare size={12} className="inline mr-1 -mt-0.5 text-slate-400" />}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[11px] font-semibold px-1.5 min-w-[20px] h-5 inline-flex items-center justify-center shrink-0">{g.unread}</span>}</div>
+                {(c.person_phone || c.labels?.length || c.assignee_name) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
               </div>
             </a>); })}
         </div>

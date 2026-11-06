@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -25,6 +25,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [target, setTarget] = useState<Conversation>(() => [...all].sort((a, b) => (b.last_inbound_at || b.last_message_at || "").localeCompare(a.last_inbound_at || a.last_message_at || ""))[0] || conv);
   const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[]; items?: { text?: string | null; attachments?: any[] }[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
   const [showGallery, setShowGallery] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [handoverBusy, setHandoverBusy] = useState(false); const [handoverMsg, setHandoverMsg] = useState("");
   const handover = async (action: "take" | "release") => {
     setHandoverBusy(true); setHandoverMsg("");
@@ -64,8 +65,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   // đóng bảng nhãn / giao việc khi bấm ra ngoài hoặc Esc
   useEffect(() => {
     if (!showLabels && !showAssign) return;
-    const onDown = (e: MouseEvent) => { if (headRef.current && !headRef.current.contains(e.target as Node)) { setShowLabels(false); setShowAssign(false); } };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setShowLabels(false); setShowAssign(false); } };
+    const onDown = (e: MouseEvent) => { if (headRef.current && !headRef.current.contains(e.target as Node)) { setShowLabels(false); setShowAssign(false); setShowMore(false); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setShowLabels(false); setShowAssign(false); setShowMore(false); } };
     document.addEventListener("mousedown", onDown); document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [showLabels, showAssign]);
@@ -228,15 +229,18 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     <>
       <div className="h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
         <div className="flex -space-x-1">{Array.from(new Set(all.map((c) => c.channel_type))).map((t) => <ChannelIcon key={t} type={t} size={22} />)}</div>
-        <div className="min-w-0"><div className="font-semibold truncate flex items-center gap-1">{conv.kind === "group" && <span className="inline-flex items-center gap-0.5 group-badge shrink-0"><Users size={10} />NHÓM</span>}<span className="truncate">{convName(conv)}</span>{conv.kind === "group" && <button title="Đổi tên nhóm trong CRM" onClick={renameGroup} className="p-0.5 text-slate-400 hover:text-blue-600 shrink-0"><Pencil size={12} /></button>}</div><div className="text-xs text-slate-500 truncate">{conv.kind === "group" ? `Nhóm Zalo · ${((conv as any).meta?.members?.length || 0) > 0 ? `${(conv as any).meta.members.length} thành viên` : "Tên gốc: " + (conv.display_name || "")}` : (multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name)}{conv.kind === "group" && (conv as any).meta?.alias && ` · Tên gốc: ${conv.display_name}`}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
+        <div className="min-w-0"><div className="font-semibold truncate flex items-center gap-1">{conv.kind === "group" && <span className="inline-flex items-center gap-0.5 group-badge shrink-0"><Users size={10} />NHÓM</span>}<span className="truncate">{convName(conv)}</span>{conv.is_important && <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />}{conv.kind === "group" && <button title="Đổi tên nhóm trong CRM" onClick={renameGroup} className="p-0.5 text-slate-400 hover:text-blue-600 shrink-0"><Pencil size={12} /></button>}</div><div className="text-xs text-slate-500 truncate">{conv.kind === "group" ? `Nhóm Zalo · ${((conv as any).meta?.members?.length || 0) > 0 ? `${(conv as any).meta.members.length} thành viên` : "Tên gốc: " + (conv.display_name || "")}` : (multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name)}{conv.kind === "group" && (conv as any).meta?.alias && ` · Tên gốc: ${conv.display_name}`}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
         <div ref={headRef} className="ml-auto flex items-center gap-1 relative md:mr-10">
-          <button className="btn px-2" title="Quan trọng" onClick={() => sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id)}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} /></button>
-          <button className="btn px-2" title="Gắn nhãn" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); }}><Tag size={15} /></button>
-          <button className="btn px-2" title="Giao cho" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); }}><UserPlus size={15} /></button>
-          <button className="btn px-2" title={conv.kind === "group" ? "Tạo đơn hàng + lịch hẹn cho nhóm này (hồ sơ khách mang tên nhóm)" : "Tạo đơn hàng + lịch hẹn cho khách này"} onClick={createOrder}><ShoppingCart size={15} /></button>
-          <button className="btn px-2" title="Thư viện ảnh / video / file / link của hội thoại" onClick={() => setShowGallery(true)}><Images size={15} /></button>
-          <a className="btn px-2 hidden md:inline-flex" title="Mở hội thoại này ở tab mới" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>
-          <button className="btn px-2" title={conv.status === "open" ? "Đóng hội thoại" : "Mở lại"} onClick={() => sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id)}><Check size={15} /></button>
+          <button className={cn("tbtn", showLabels && "active")} title="Gắn nhãn cho hội thoại" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); setShowMore(false); }}><Tag size={15} /><span className="hidden lg:inline">Nhãn</span></button>
+          <button className={cn("tbtn", showAssign && "active")} title="Giao hội thoại cho nhân viên" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); setShowMore(false); }}><UserPlus size={15} /><span className="hidden lg:inline">Giao cho</span></button>
+          <button className="tbtn" title={conv.kind === "group" ? "Tạo đơn hàng + lịch hẹn cho nhóm này" : "Tạo đơn hàng + lịch hẹn cho khách này"} onClick={createOrder}><ShoppingCart size={15} /><span className="hidden lg:inline">Tạo đơn</span></button>
+          <button className="tbtn" title="Thư viện ảnh / video / file / link" onClick={() => setShowGallery(true)}><Images size={15} /><span className="hidden lg:inline">Thư viện</span></button>
+          <button className={cn("tbtn", showMore && "active")} title="Thêm thao tác" onClick={() => { setShowMore((v) => !v); setShowLabels(false); setShowAssign(false); setShowMore(false); }}><MoreHorizontal size={16} /></button>
+          {showMore && <div className="absolute right-0 top-10 z-10 card p-1.5 w-60 shadow-lg text-sm">
+            <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id); setShowMore(false); }}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} />{conv.is_important ? "Bỏ đánh dấu quan trọng" : "Đánh dấu quan trọng"}</button>
+            <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id); setShowMore(false); }}><Check size={15} />{conv.status === "open" ? "Đóng hội thoại (đã xử lý xong)" : "Mở lại hội thoại"}</button>
+            <a className="hidden md:flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer" onClick={() => setShowMore(false)}><ExternalLink size={15} />Mở ở tab mới</a>
+          </div>}
           {showLabels && <div className="absolute right-0 top-10 z-10 card p-2 w-56 max-h-72 overflow-auto shadow-lg"><div className="flex items-center justify-between text-xs text-slate-500 mb-1"><span>Gắn nhãn</span><button onClick={() => setShowLabels(false)} className="btn px-1.5 py-0.5"><X size={12} /></button></div>{labels.map((l) => <label key={l.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer"><input type="checkbox" checked={convLabels.includes(l.name)} onChange={() => toggleLabel(l.name)} /><span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />{l.name}</label>)}</div>}
           {showAssign && <div className="absolute right-0 top-10 z-10 card p-2 w-56 shadow-lg">{members.map((m) => <button key={m.id} onClick={() => assign(m.id)} className="block w-full text-left py-1.5 px-2 rounded hover:bg-slate-50 text-sm">{m.name}</button>)}</div>}
         </div>
@@ -260,18 +264,18 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <div key={m.id} id={"msg-" + m.id} className={cn("flex group items-center gap-1.5 rounded-xl transition py-0.5", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && renderActions(m)}
-            <div className={cn("max-w-[70%] rounded-2xl px-3 py-2 text-sm shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
+            <div className={cn("max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <img key={i} src={a.url} alt="" className="rounded-lg max-h-60 mb-1 cursor-zoom-in hover:opacity-95" onLoad={() => { if (atBottom) jumpBottom(); }} onClick={() => { const k = allImages.findIndex((x) => x.url === a.url); setLb(k >= 0 ? k : 0); }} /> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
-              {m.direction === "in" && (m as any).sender_name && <div className="text-[11px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
+              {m.direction === "in" && (m as any).sender_name && <div className="text-[12px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
               {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const target = q.msg_id ? msgs.find((x) => x.external_msg_id === q.msg_id) : null; return (
                 <button onClick={() => { if (!target) return; const el = document.getElementById("msg-" + target.id); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("ring-2", "ring-amber-400"); setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 1800); } }} title={target ? "Nhảy tới tin gốc" : "Tin gốc không nằm trong phần đã tải"} className={cn("mb-1.5 w-full text-left flex gap-2 items-center rounded-md border-l-4 px-2 py-1.5 text-xs", m.direction === "out" ? "bg-black/15 border-white/60 text-white/90" : "bg-slate-100 border-blue-500 text-slate-700", target && "cursor-pointer hover:opacity-90")}>
                   {q.thumb && <img src={q.thumb} alt="" className="w-10 h-10 rounded object-cover shrink-0" />}
                   <div className="min-w-0"><div className="font-semibold truncate">{q.from || "Tin nhắn"}</div><div className="truncate opacity-80">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.kind === "video" ? "[Video]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
                 </button>); })()}
-              {m.direction === "out" && <div className={cn("text-[10px] font-medium opacity-80 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 Business Suite (AI Meta / trả lời ngoài CRM)" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
+              {m.direction === "out" && <div className={cn("text-[11px] font-medium opacity-85 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 Business Suite (AI Meta / trả lời ngoài CRM)" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : (m as any).raw?.contact ? <ContactCard c={(m as any).raw.contact} /> : (m as any).raw?.call ? <CallCard call={(m as any).raw.call} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
-              <div className={cn("text-[10px] mt-1 flex items-center gap-1", m.direction === "out" ? "text-blue-100" : "text-slate-400")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
+              <div className={cn("text-[11px] mt-1 flex items-center gap-1 tabular-nums", m.direction === "out" ? "text-blue-100/90" : "text-slate-500")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
             </div>
             {m.direction !== "out" && renderActions(m)}
           </div>
@@ -301,7 +305,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }} onDragOver={(e) => e.preventDefault()} />
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
         <div className="flex items-center gap-2 mt-2">
-          <div className="relative" ref={quickRef}><button className={cn("btn px-2", showQuick && "bg-blue-50 border-blue-300")} title="Trả lời nhanh" onClick={() => setShowQuick((v) => !v)}><Zap size={14} /></button>
+          <div className="relative" ref={quickRef}><button className={cn("tbtn", showQuick && "active")} title="Trả lời nhanh (hoặc gõ / trong ô nhập)" onClick={() => setShowQuick((v) => !v)}><Zap size={15} /><span className="hidden lg:inline">Trả lời nhanh</span></button>
             {showQuick && <div className="absolute bottom-9 left-0 z-20 card w-80 shadow-lg p-1">
               <input autoFocus className="input mb-1" placeholder="Gõ từ khoá: quạt, đèn thả, chào, showroom…" value={quickQ} onChange={(e) => setQuickQ(e.target.value)} />
               <div className="max-h-64 overflow-auto">
@@ -313,9 +317,9 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
               </div>
             </div>}
           </div>
-          <button className="btn px-2" title="Đính kèm ảnh / video / PDF" onClick={() => fileRef.current?.click()}><Paperclip size={14} /></button>
+          <button className="tbtn" title="Đính kèm ảnh / video / PDF (hoặc dán Ctrl+V, kéo thả)" onClick={() => fileRef.current?.click()}><Paperclip size={15} /><span className="hidden lg:inline">Đính kèm</span></button>
           {/* hẹn giờ gửi: ẩn theo yêu cầu (hay bấm nhầm); logic gửi theo lịch vẫn giữ nguyên */}
-          <button className="btn btn-primary ml-auto" onClick={send} disabled={sending || (!text.trim() && !files.length)}><Send size={14} /> {uploading ? "Đang tải lên…" : schedule ? "Hẹn gửi" : "Gửi"}</button>
+          <button className={cn("ml-auto inline-flex items-center gap-1.5 rounded-md px-4 text-sm font-semibold transition-colors duration-150 active:scale-[0.97] h-9", (text.trim() || files.length) && !sending ? "bg-blue-600 hover:bg-blue-700 text-white shadow-sm cursor-pointer" : "bg-slate-200 text-slate-500 cursor-not-allowed dark-send-off")} onClick={send} disabled={sending || (!text.trim() && !files.length)} title="Gửi (Enter)"><Send size={15} /> {uploading ? "Đang tải lên…" : sending ? "Đang gửi…" : schedule ? "Hẹn gửi" : "Gửi"}</button>
         </div>
       </div>
     </>

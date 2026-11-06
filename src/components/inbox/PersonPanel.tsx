@@ -7,14 +7,14 @@ import type { Conversation, Lead, Person } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { GroupAvatar } from "@/components/GroupAvatar";
 import { extractPhone } from "@/lib/phone";
-import { money, dt } from "@/lib/utils";
+import { money, dt, cn } from "@/lib/utils";
 
 export function PersonPanel({ conv, members }: { conv: Conversation; members: { id: string; name: string }[] }) {
   const sb = supabaseBrowser();
   const [person, setPerson] = useState<Person | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [orders, setOrders] = useState<{ id: string; code: string; grand_total: number; status: string }[]>([]);
-  const [friendTask, setFriendTask] = useState<{ status: string } | null>(null);
+  const [friendTask, setFriendTask] = useState<{ id: string; status: string } | null>(null);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -24,7 +24,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
       const { data: p } = await sb.from("crm_customers").select("*").eq("id", conv.customer_id).single(); setPerson(p as Person); setPhone(p?.phone || ""); setName(p?.name || "");
       const { data: l } = await sb.from("crm_v_leads").select("*").eq("person_id", conv.customer_id).order("created_at", { ascending: false }); setLeads((l as Lead[]) || []);
       const { data: o } = await sb.from("crm_orders").select("id,code,grand_total,status").eq("person_id", conv.customer_id).order("created_at", { ascending: false }); setOrders(o || []);
-      if (p?.phone) { const { data: t } = await sb.from("crm_zalo_friend_tasks").select("status").eq("phone", p.phone).order("created_at", { ascending: false }).limit(1).maybeSingle(); setFriendTask(t); }
+      if (p?.phone) { const { data: t } = await sb.from("crm_zalo_friend_tasks").select("id,status").eq("phone", p.phone).order("created_at", { ascending: false }).limit(1).maybeSingle(); setFriendTask(t); }
     } else {
       setPerson(null); setLeads([]); setOrders([]);
       setName(conv.display_name || "");
@@ -67,6 +67,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
   };
   const requestZaloFriend = async () => {
     if (!person?.phone) return;
+    if (friendTask?.status === "failed") { await sb.from("crm_zalo_friend_tasks").update({ status: "pending", attempts: 0, last_error: null }).eq("id", friendTask.id); load(); return; } // thử lại
     await sb.from("crm_zalo_friend_tasks").insert({ customer_id: person.id, phone: person.phone, source_conversation_id: conv.id, greeting: `Xin chào ${person.name || ""}, em bên showroom THLED Đồng Nai, kết bạn để gửi báo giá và tư vấn ạ.`.slice(0, 150) });
     load();
   };
@@ -98,15 +99,16 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
           <Row k="Phone"><div className="flex gap-1"><input className="input py-1" value={phone} onChange={(e) => setPhone(e.target.value)} onBlur={savePhone} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />{person.phone && <a className="btn px-2" href={`tel:${person.phone}`}><Phone size={14} /></a>}</div>
             {Array.isArray(person.custom?.phones) && person.custom.phones.length > 0 && <div className="flex flex-wrap gap-1 mt-1">{(person.custom.phones as string[]).map((x: string) => <span key={x} className="chip bg-slate-100 text-slate-700 text-xs">{x} <button className="ml-1 text-blue-600" title="Dùng làm số chính" onClick={() => makePrimary(x)}>↑</button></span>)}</div>}</Row>
           <Row k="Giới tính"><select className="input py-1" value={person.gender || ""} onChange={async (e) => { await sb.from("crm_customers").update({ gender: e.target.value || null }).eq("id", person.id); load(); }}><option value="">-</option><option>Nam</option><option>Nữ</option></select></Row>
-          <Row k="Email">{person.email || "-"}</Row>
+          {person.email && <Row k="Email">{person.email}</Row>}
           <Row k="Phụ trách"><select className="input py-1" value={person.assigned_to || ""} onChange={async (e) => { await sb.from("crm_customers").update({ assigned_to: e.target.value || null }).eq("id", person.id); load(); }}><option value="">-</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Row>
           <Row k="SP quan tâm"><input className="input py-1" defaultValue={(person.custom?.sp_quan_tam as string) || ""} onBlur={async (e) => { await sb.from("crm_customers").update({ custom: { ...person.custom, sp_quan_tam: e.target.value } }).eq("id", person.id); }} /></Row>
-          <Row k="Cảm xúc">{person.emotion || conv.emotion || "-"}</Row>
-          <Row k="Nguồn">{person.source_origin || "-"}</Row>
+          {(person.emotion || conv.emotion) && <Row k="Cảm xúc">{person.emotion || conv.emotion}</Row>}
+          <Row k="Nguồn">{({ automation: "Tự động từ hội thoại", manual: "Tạo tay", import: "Nhập file", web: "Website" } as Record<string, string>)[person.source_origin || ""] || person.source_origin || "—"}</Row>
 
           <div className="pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-1"><b>Kết bạn Zalo</b>{friendTask && <span className="chip bg-slate-100">{friendTask.status}</span>}</div>
-            <button className="btn w-full justify-center" onClick={requestZaloFriend} disabled={!person.phone || !!friendTask}><UserPlus size={14} /> Gửi lời mời kết bạn</button>
+            <div className="flex items-center justify-between mb-1"><b>Kết bạn Zalo</b>{friendTask && <span className={cn("lchip", friendTask.status === "accepted" ? "lchip-green" : friendTask.status === "failed" ? "lchip-red" : friendTask.status === "sent" ? "lchip-blue" : "lchip-gray")}>{({ pending: "Đang chờ gửi", sent: "Đã gửi lời mời", accepted: "Đã là bạn", failed: "Chưa gửi được", skipped: "Bỏ qua" } as Record<string, string>)[friendTask.status] || friendTask.status}</span>}</div>
+            <button className="btn w-full justify-center" onClick={requestZaloFriend} disabled={!person.phone || (!!friendTask && friendTask.status !== "failed")}><UserPlus size={14} /> {friendTask?.status === "failed" ? "Thử gửi lại lời mời" : "Gửi lời mời kết bạn"}</button>
+            {!person.phone && <div className="text-xs text-slate-500 mt-1">Cần có SĐT để kết bạn.</div>}
           </div>
 
           <div className="pt-2 border-t border-slate-100">
@@ -131,4 +133,4 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
     </div>
   );
 }
-const Row = ({ k, children }: { k: string; children: React.ReactNode }) => <div className="grid grid-cols-[90px_1fr] items-center gap-2"><div className="text-slate-500 text-xs">{k}</div><div className="min-w-0">{children}</div></div>;
+const Row = ({ k, children }: { k: string; children: React.ReactNode }) => <div className="grid grid-cols-[90px_1fr] items-center gap-2 min-h-[30px]"><div className="text-slate-500 text-[12px]">{k}</div><div className="min-w-0 text-[13px]">{children}</div></div>;
