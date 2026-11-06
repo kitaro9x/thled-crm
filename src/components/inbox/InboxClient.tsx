@@ -112,7 +112,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         <div className="flex-1 overflow-y-auto">
           {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
           {groups.map((g, gi) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
-            <a key={g.key} href={`/inbox?c=${c.id}`} onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; /* Ctrl/⌘+click, chuột giữa → mở tab mới */ e.preventDefault(); setSel(g.key); setMobileView("thread"); }} className={cn("conv-row", sel === g.key && "sel", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
+            <a key={g.key} href={`/inbox?c=${c.id}`} onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; /* Ctrl/⌘+click, chuột giữa → mở tab mới */ e.preventDefault(); setSel(g.key); setMobileView("thread"); }} className={cn("conv-row", (sel === g.key || g.convs.some((x) => x.id === sel)) && "sel", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
               <div className={cn("relative shrink-0 self-start mt-0.5", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={42} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={42} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
