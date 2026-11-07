@@ -38,6 +38,8 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
   }
   return (
     <div className="h-[100dvh] flex flex-col md:flex-row">
+      {/* iPhone (PWA toàn màn hình): chừa chỗ cho thanh trạng thái / Dynamic Island */}
+      <div className="md:hidden shrink-0 bg-slate-900" style={{ height: "env(safe-area-inset-top)" }} />
       <aside className="hidden md:flex w-[72px] shrink-0 bg-slate-900 text-slate-300 flex-col items-center py-3 gap-1">
         <Link href="/inbox" className="mb-2 text-white font-black text-lg">TH</Link>
         {navFor.map((n) => <NavLink key={n.href} href={n.href} label={n.label} icon={<n.icon size={20} />} />)}

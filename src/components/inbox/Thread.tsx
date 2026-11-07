@@ -26,6 +26,12 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[]; items?: { text?: string | null; attachments?: any[] }[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
   const [showGallery, setShowGallery] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  // điện thoại: nhấn giữ tin 450ms → hiện thanh thao tác (trích dẫn / chuyển tiếp / chép / chọn)
+  const [touchActions, setTouchActions] = useState<string | null>(null); const lpTimer = useRef<any>(null);
+  const lpStart = (id: string) => { lpTimer.current = setTimeout(() => { setTouchActions(id); if (navigator.vibrate) navigator.vibrate(10); }, 450); };
+  const lpEnd = () => { if (lpTimer.current) clearTimeout(lpTimer.current); };
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => { const mq = window.matchMedia("(max-width: 767px)"); const f = () => setIsMobile(mq.matches); f(); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); }, []);
   const [handoverBusy, setHandoverBusy] = useState(false); const [handoverMsg, setHandoverMsg] = useState("");
   const handover = async (action: "take" | "release") => {
     setHandoverBusy(true); setHandoverMsg("");
@@ -175,7 +181,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     if (!(m.text || m.attachments?.length)) return null;
     const on = picked.has(m.id);
     const B = (title: string, onClick: () => void, icon: React.ReactNode, active?: boolean) => <button title={title} onClick={onClick} className={cn("p-1.5 rounded-md text-slate-500 hover:bg-blue-50 hover:text-blue-700 transition", active && "text-blue-700")}>{icon}</button>;
-    return <div className={cn("flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white shadow-md px-0.5 self-center transition-opacity", picked.size || on ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
+    if (isMobile && touchActions !== m.id && !picked.size && !on) return null;
+    return <div className={cn("flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white shadow-md px-0.5 self-center transition-opacity", picked.size || on || touchActions === m.id ? "opacity-100 msg-actions" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
       {!picked.size && <>{B("Trích dẫn tin này để trả lời", () => { setReplyTo(m); taRef.current?.focus(); }, <MessageSquareQuote size={15} />)}
       {B("Chuyển tiếp", () => setFwd({ text: m.text, attachments: m.attachments }), <Forward size={15} />)}
       {m.text && B("Chép nội dung", () => { navigator.clipboard?.writeText(m.text || ""); }, <Copy size={15} />)}</>}
@@ -258,10 +265,10 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
       {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
-      <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
+      <div ref={scroller} onScroll={onScroll} onClick={(e) => { if (touchActions && !(e.target as HTMLElement).closest(".msg-actions")) setTouchActions(null); }} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
         {hasMore && <div className="text-center"><button onClick={loadOlder} disabled={loadingOld} className="btn text-xs px-3 py-1">{loadingOld ? "Đang tải…" : "Xem tin cũ hơn"}</button></div>}
         {msgs.map((m) => (
-          <div key={m.id} id={"msg-" + m.id} className={cn("flex group items-center gap-1.5 rounded-xl transition py-0.5", m.direction === "out" ? "justify-end" : "justify-start")}>
+          <div key={m.id} id={"msg-" + m.id} onTouchStart={() => lpStart(m.id)} onTouchEnd={lpEnd} onTouchMove={lpEnd} onContextMenu={(e) => { if (isMobile) e.preventDefault(); }} className={cn("flex group items-center gap-1.5 rounded-xl transition py-0.5 select-none md:select-text", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && renderActions(m)}
             <div className={cn("max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
@@ -300,7 +307,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <div className="min-w-0 flex-1"><div className="font-semibold">Trả lời {q.from}</div><div className="truncate text-slate-600">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
           <button onClick={() => setReplyTo(null)} className="p-1 rounded hover:bg-slate-200" title="Bỏ trích dẫn (Esc)"><X size={14} /></button></div>; })()}
         {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
-        <textarea ref={taRef} className="input resize-none" rows={3} placeholder="Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
+        <textarea ref={taRef} className="input resize-none" rows={3} placeholder={isMobile ? "Nhập tin nhắn… (nhấn giữ tin để trích dẫn / chuyển tiếp)" : "Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)"} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onPaste={(e) => { const fs = Array.from(e.clipboardData.files || []); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
           onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }} onDragOver={(e) => e.preventDefault()} />
         <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,application/pdf" className="hidden" onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />

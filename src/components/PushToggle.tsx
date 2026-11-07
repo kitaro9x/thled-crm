@@ -29,7 +29,7 @@ export function PushToggle({ compact }: { compact?: boolean }) {
     if (sub) { await fetch("/api/push/subscribe", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: sub.endpoint }) }); await sub.unsubscribe(); }
     setState("off"); setMsg("Đã tắt thông báo trên thiết bị này");
   };
-  const cls = compact ? "flex-1 flex flex-col items-center gap-0.5 py-1.5 text-[10px] hover:text-white" : "w-16 flex flex-col items-center gap-0.5 rounded-md py-2 text-[10px] hover:bg-slate-800 hover:text-white";
+  const cls = compact ? "flex-1 flex flex-col items-center gap-0.5 py-1.5 text-[11px] hover:text-white" : "w-16 flex flex-col items-center gap-0.5 rounded-md py-2 text-[11px] hover:bg-slate-800 hover:text-white";
   if (state === "unsupported") return null;
   if (state === "denied") return <button className={cls} title="Trình duyệt đang chặn thông báo — mở cài đặt trang web để cho phép" onClick={() => setMsg("Thông báo bị chặn: bấm ổ khoá cạnh địa chỉ → Thông báo → Cho phép, rồi tải lại.")}><BellOff size={18} /><span>Bị chặn</span></button>;
   return <button className={cls + (state === "on" ? " text-emerald-400" : "")} title={state === "on" ? "Đang bật thông báo (bấm để tắt)" : "Bật thông báo khi khách nhắn"} onClick={state === "on" ? disable : enable} disabled={state === "busy"}>
