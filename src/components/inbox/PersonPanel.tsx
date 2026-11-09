@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Phone, Plus, UserPlus, Sparkles } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import type { Conversation, Lead, Person } from "@/lib/types";
+import type { Conversation, Lead, Person, Stage } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
 import { GroupAvatar } from "@/components/GroupAvatar";
 import { extractPhone } from "@/lib/phone";
@@ -59,6 +59,26 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
   };
   const makePrimary = async (v: string) => { if (!person) return; setPhone(v); const extra = ((person.custom?.phones as string[]) || []).filter((x: string) => x !== v); const custom = { ...(person.custom || {}), phones: person.phone ? [person.phone, ...extra] : extra }; await sb.from("crm_customers").update({ phone: v, custom }).eq("id", person.id); load(); };
   const [leadBusy, setLeadBusy] = useState(false); const [leadMsg, setLeadMsg] = useState("");
+  // các giai đoạn của phễu mặc định → nút bấm nhanh "đánh dấu" ngay trong panel (Đã mua hàng = giai đoạn WON)
+  const [stages, setStages] = useState<Stage[]>([]);
+  useEffect(() => { (async () => { const { data: pipe } = await sb.from("crm_pipelines").select("id").eq("is_default", true).single(); if (!pipe) return; const { data } = await sb.from("crm_stages").select("*").eq("pipeline_id", pipe.id).order("sort_order"); setStages((data as Stage[]) || []); })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  const openLead = leads.find((l) => l.status === "open") || null; // cơ hội mở gần nhất (leads đã sort created_at desc)
+  const lastLead = leads[0] || null;
+  const markStage = async (st: Stage) => {
+    if (!person || leadBusy) return; setLeadBusy(true); setLeadMsg("");
+    const hdr = { "content-type": "application/json" };
+    const patch = async (id: string) => { const r = await fetch("/api/leads", { method: "PATCH", headers: hdr, body: JSON.stringify({ id, stage_id: st.id }) }); if (!r.ok) setLeadMsg((await r.json()).error || "Không đổi được giai đoạn"); };
+    try {
+      if (openLead) { if (openLead.stage_id !== st.id) await patch(openLead.id); }
+      else {
+        // chưa có cơ hội mở → tạo mới. WON thì tạo ở giai đoạn mở đầu rồi chuyển sang WON để trigger DB ghi status/won_at/lịch sử đúng
+        const first = stages.find((x) => x.kind === "open") || st;
+        const r = await fetch("/api/leads", { method: "POST", headers: hdr, body: JSON.stringify({ title: person.name, person_id: person.id, pipeline_id: st.pipeline_id, stage_id: st.kind === "won" ? first.id : st.id, source_conversation_id: conv.id, source_channel_id: conv.channel_id, force: true }) });
+        const j = await r.json(); if (!r.ok) setLeadMsg(j.error || "Không tạo được cơ hội"); else if (st.kind === "won" || j.existing) await patch(j.id);
+      }
+    } catch (e: any) { setLeadMsg(e.message || "Lỗi"); }
+    setLeadBusy(false); load();
+  };
   const createLead = async () => {
     if (!person || leadBusy) return; setLeadBusy(true); setLeadMsg("");
     const { data: pipe } = await sb.from("crm_pipelines").select("id").eq("is_default", true).single();
@@ -116,7 +136,11 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
           </div>
 
           <div className="pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-1"><b>Cơ hội ({leads.filter((l) => l.status === "open").length} mở)</b><button className="btn px-2 py-0.5" onClick={createLead} disabled={leadBusy}><Plus size={12} /></button></div>{leadMsg && <div className="text-xs text-amber-700 mb-1">{leadMsg}</div>}
+            <div className="flex items-center justify-between mb-1"><b>Cơ hội ({leads.filter((l) => l.status === "open").length} mở)</b><button className="btn px-2 py-0.5" title="Tạo cơ hội ở giai đoạn đầu" onClick={createLead} disabled={leadBusy}><Plus size={12} /></button></div>
+            {stages.length > 0 && <div className="flex flex-wrap gap-1 mb-2" title={openLead ? "Bấm để chuyển cơ hội đang mở sang giai đoạn đó" : "Chưa có cơ hội mở — bấm để tạo cơ hội ở giai đoạn đó"}>
+              {stages.filter((st) => st.kind !== "lost").map((st) => { const on = openLead ? openLead.stage_id === st.id : (st.kind === "won" && lastLead?.status === "won"); return (
+                <button key={st.id} type="button" disabled={leadBusy || on} onClick={() => markStage(st)} className={cn("lchip border transition-colors", on ? "text-white border-transparent" : "bg-transparent text-slate-600 hover:text-white")} style={on ? { background: st.color } : { borderColor: st.color }} onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = st.color; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>{st.kind === "won" ? "✓ Đã mua hàng" : st.name}</button>); })}
+            </div>}{leadMsg && <div className="text-xs text-amber-700 mb-1">{leadMsg}</div>}
             {leads.map((l) => <Link key={l.id} href={`/leads?lead=${l.id}`} className="block rounded border border-slate-100 p-2 mb-1 hover:bg-slate-50"><div className="font-medium truncate">{l.title}</div><div className="text-xs text-slate-500"><span className="chip text-white" style={{ background: l.stage_color }}>{l.stage_name}</span> · {dt(l.created_at, "dd/MM")}</div></Link>)}
           </div>
 
