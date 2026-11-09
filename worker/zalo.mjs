@@ -211,7 +211,7 @@ async function main() {
   const own = api.getOwnId();
   const me = await api.fetchAccountInfo().catch(() => null);
   const name = me?.profile?.displayName || "Zalo cá nhân";
-  await setWorker({ state: "online", own_uid: own, account_name: name, qr_image: null, heartbeat_at: new Date().toISOString() });
+  await setWorker({ state: "online", own_uid: own, account_name: name, qr_image: null, last_error: null, heartbeat_at: new Date().toISOString() }); // lên online → xoá lỗi cũ
   // đảm bảo kênh tồn tại
   await sb.from("crm_channels").upsert({ type: "zalo_personal", external_id: String(own), name, status: "connected" }, { onConflict: "type,external_id" });
   console.log("Online:", name, own);
