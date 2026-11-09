@@ -54,7 +54,9 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   useEffect(() => { // cơ hội / đơn hàng đổi → tải lại tag
     const sb = supabaseBrowser();
     const ch = sb.channel("inbox-leads").on("postgres_changes", { event: "*", schema: "public", table: "crm_leads" }, () => loadLeadTags()).on("postgres_changes", { event: "*", schema: "public", table: "crm_orders" }, () => loadLeadTags()).subscribe();
-    return () => { sb.removeChannel(ch); };
+    const onLocal = () => loadLeadTags(); window.addEventListener("crm:leads-changed", onLocal); // panel vừa đổi giai đoạn / tạo cơ hội
+    const onFocus = () => loadLeadTags(); window.addEventListener("focus", onFocus); // quay lại từ trang Cơ hội (Kanban) → tải lại tag
+    return () => { sb.removeChannel(ch); window.removeEventListener("crm:leads-changed", onLocal); window.removeEventListener("focus", onFocus); };
   }, [loadLeadTags]);
   // lọc theo lead: bought = WON/có đơn · open = đang có cơ hội mở (kể cả khách cũ mua lại) · lost = chỉ còn cơ hội thất bại · none = chưa có gì
   const matchLead = (c: Conversation, want: string) => {

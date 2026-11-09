@@ -80,6 +80,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
       }
     } catch (e: any) { setLeadMsg(e.message || "Lỗi"); }
     setLeadBusy(false); load();
+    try { window.dispatchEvent(new Event("crm:leads-changed")); } catch {} // danh sách hội thoại cập nhật tag ngay, không chờ realtime
   };
   const createLead = async () => {
     if (!person || leadBusy) return; setLeadBusy(true); setLeadMsg("");
@@ -87,7 +88,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
     const { data: stage } = await sb.from("crm_stages").select("id").eq("pipeline_id", pipe!.id).eq("kind", "open").order("sort_order").limit(1).single();
     const r = await fetch("/api/leads", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: person.name, person_id: person.id, pipeline_id: pipe!.id, stage_id: stage!.id, source_conversation_id: conv.id, source_channel_id: conv.channel_id }) });
     const j = await r.json(); if (j.existing) setLeadMsg("Khách đã có cơ hội đang mở — không tạo thêm."); setLeadBusy(false);
-    load();
+    load(); try { window.dispatchEvent(new Event("crm:leads-changed")); } catch {}
   };
   const requestZaloFriend = async () => {
     if (!person?.phone) return;
