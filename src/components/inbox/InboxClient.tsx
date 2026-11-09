@@ -31,6 +31,9 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const skipLabels = useMemo(() => new Set(labels.filter((l) => l.skip_lead).map((l) => l.name)), [labels]);
   const blockingLabel = useCallback((cs: Conversation[]) => cs.flatMap((c) => c.labels || []).find((l) => skipLabels.has(l)) || null, [skipLabels]);
   const leadable = useCallback((cs: Conversation[]) => !blockingLabel(cs), [blockingLabel]);
+  // khách có BẤT KỲ hội thoại nào mang nhãn loại trừ → cả khách đó không phải khách hàng (đồng bộ với panel)
+  const blockedCust = useMemo(() => new Set(convs.filter((c) => !leadable([c])).map((c) => c.customer_id).filter(Boolean) as string[]), [convs, leadable]);
+  const isCustomer = useCallback((c: Conversation) => leadable([c]) && !(c.customer_id && blockedCust.has(c.customer_id)), [leadable, blockedCust]);
   const custKey = useMemo(() => Array.from(new Set(convs.filter((c) => leadable([c])).map((c) => c.customer_id).filter(Boolean) as string[])).sort().join(","), [convs, leadable]);
   const loadLeadTags = useCallback(async () => {
     const ids = custKey ? custKey.split(",") : []; if (!ids.length) { setLeadTags({}); return; }
@@ -66,6 +69,10 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     return !t || (!t.open && !bought && !t.lost);
   };
   const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
+  // chip "Khách hàng": chỉ hiện hội thoại là khách (chưa gắn nhãn hoặc nhãn khách) — loại Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick "Không tạo cơ hội")
+  const [custOnly, setCustOnly] = useState(false);
+  useEffect(() => { try { setCustOnly(localStorage.getItem("inbox_cust_only") === "1"); } catch {} }, []);
+  const toggleCustOnly = () => { setCustOnly((v) => { try { localStorage.setItem("inbox_cust_only", v ? "0" : "1"); } catch {} return !v; }); };
   const [mobileView, setMobileView] = useState<"list" | "thread" | "panel">("list"); // điện thoại: từng màn
   const [showPanel, setShowPanel] = useState(true); // máy tính: ẩn/hiện cột hồ sơ khách
   useEffect(() => { try { const v = localStorage.getItem("inbox_panel"); if (v !== null) setShowPanel(v === "1"); } catch {} }, []);
@@ -98,6 +105,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (qf === "unanswered" && !(c.last_inbound_at && (!c.last_message_at || c.last_inbound_at >= c.last_message_at))) return false;
     if (qf === "important" && !c.is_important) return false;
     if (qf === "overdue" && !(c.last_inbound_at && c.unread_count > 0 && Date.now() - new Date(c.last_inbound_at).getTime() > 15 * 60000)) return false;
+    if (custOnly && !isCustomer(c)) return false;
     if (f.channel && c.channel_id !== f.channel) return false;
     if (f.label && !c.labels?.includes(f.label)) return false;
     if (f.assignee && c.assigned_to !== f.assignee) return false;
@@ -106,7 +114,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (f.lead && !matchLead(c, f.lead)) return false;
     if (q) { const s = q.toLowerCase(); return convName(c).toLowerCase().includes(s) || (c.person_phone || "").includes(s) || (c.last_message_text || "").toLowerCase().includes(s); }
     return true;
-  }), [convs, q, qf, f, leadTags]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
+  }), [convs, q, qf, f, leadTags, custOnly, isCustomer]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
 
   // gộp: 1 khách (customer_id) = 1 dòng; hội thoại chưa có khách đứng riêng
   const groups = useMemo(() => {
@@ -140,7 +148,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
-          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}</div>
+          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}<button onClick={toggleCustOnly} title="Chỉ hiện khách hàng: hội thoại chưa gắn nhãn hoặc nhãn khách. Ẩn Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick 'Không tạo cơ hội' trong Cài đặt → Nhãn). Kết hợp được với các chip khác." className={cn("fchip", custOnly && "on", custOnly && "ring-1 ring-emerald-400")}>{custOnly ? "✓ " : ""}Khách hàng</button></div>
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
               <select className="input" value={f.channel || ""} onChange={(e) => setF({ ...f, channel: e.target.value || undefined })}><option value="">Nguồn hội thoại</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
