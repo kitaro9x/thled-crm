@@ -30,6 +30,8 @@ pm2 logs zalo                    # xem log, Ctrl+C thoát
 pm2 restart zalo                 # khởi động lại worker
 pm2 status
 cd /opt/thled-crm && git pull && npm i && pm2 restart zalo   # cập nhật code mới
+
+**Kết bạn / chặn Zalo từ CRM** (worker ≥ bản 11/2026): worker đồng bộ danh sách bạn bè → `crm_identities.meta.is_friend` (30s sau khi online, rồi 30 phút/lần); panel khách hiện "Đã là bạn" hoặc nút *Gửi lời mời kết bạn* (hội thoại Zalo thì kết bạn theo UID, không cần SĐT). Menu ⋯ của hội thoại có *Xoá hội thoại khỏi CRM* (ẩn, `is_hidden`, tin mới không hiện/không báo) và *Chặn người này trên Zalo* → ghi `crm_zalo_actions` (block/unblock), worker gọi `blockUser`. Xem lại/khôi phục ở bộ lọc "Đã xoá/chặn". Cần chạy migration `supabase/migrations/20261109_zalo_actions.sql` và cập nhật worker trên VPS.
 cat /opt/thled-crm/.env.local    # xem env (URL, service key, CRON_SECRET, APP_URL)
 ```
 Cài lại từ máy trắng (Ubuntu 24.04, **không** chọn mẫu có đuôi EOL/Aapanel/1Panel): `apt-get update -y && apt-get install -y curl` rồi `curl -fsSL https://raw.githubusercontent.com/kitaro9x/thled-crm/main/scripts/install-vps.sh | bash`. Có sẵn 4 dòng env thì tạo thẳng `/opt/thled-crm/.env.local` trước khi chạy script để khỏi phải nhập tay. Chỉ chạy **1 worker** tại một thời điểm (tắt máy cũ `pm2 stop zalo && pm2 save` trước khi bật máy mới), nếu không 2 worker giành phiên và gửi trùng tin.

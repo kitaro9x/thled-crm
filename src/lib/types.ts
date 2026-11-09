@@ -20,7 +20,7 @@ export interface Person {
 }
 export interface Conversation {
   id: string; identity_id: string; customer_id?: string | null; channel_id?: string | null; channel: string; status: string;
-  assigned_to?: string | null; labels: string[]; subscribers: string[]; is_important: boolean; kind: string;
+  assigned_to?: string | null; labels: string[]; subscribers: string[]; is_important: boolean; is_hidden?: boolean; kind: string; meta?: Record<string, any>;
   last_message_text?: string | null; last_message_at?: string | null; last_inbound_at?: string | null; unread_count: number;
   ai_summary?: string | null; emotion?: string | null; scheduled_message?: { text: string; send_at: string } | null;
   // from view

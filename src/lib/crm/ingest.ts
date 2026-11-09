@@ -82,7 +82,7 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   }
 
   // thông báo đẩy cho nhân sự khi khách nhắn (kể cả nhóm)
-  if (direction === "in") {
+  if (direction === "in" && !conv.is_hidden) { // hội thoại đã xoá/chặn trong CRM → không làm phiền
     const who = (kind === "group" ? (m.messageSenderName ? m.messageSenderName + " · " : "") : "") + (identity.display_name || m.senderName || "Khách");
     const preview = m.text || (m.attachments?.length ? `[${m.attachments[0].type === "image" ? "Ảnh" : m.attachments[0].type === "video" ? "Video" : "Tệp"}]` : "[Tin nhắn]");
     void pushNewMessage(db, { conversationId: conv.id, title: `${who} (${channel.type === "fb_page" ? "Messenger" : kind === "group" ? "Nhóm Zalo" : "Zalo"})`, body: preview, icon: identity.avatar_url, assignedTo: conv.assigned_to, labels: conv.labels || [] });

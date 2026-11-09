@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Phone, Plus, UserPlus, Sparkles } from "lucide-react";
+import { Phone, Plus, UserPlus, Sparkles, Ban } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Lead, Person, Stage } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -18,17 +18,27 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
   const [person, setPerson] = useState<Person | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [orders, setOrders] = useState<{ id: string; code: string; grand_total: number; status: string }[]>([]);
-  const [friendTask, setFriendTask] = useState<{ id: string; status: string } | null>(null);
+  const [friendTask, setFriendTask] = useState<{ id: string; status: string; last_error?: string | null } | null>(null);
+  // hội thoại Zalo 1:1: trạng thái bạn bè / chặn lấy từ identity.meta (worker đồng bộ)
+  const isZalo = conv.channel_type === "zalo_personal" && conv.kind !== "group";
+  const [ident, setIdent] = useState<{ meta?: Record<string, any> | null; phone?: string | null } | null>(null);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
+    if (isZalo) {
+      const [{ data: i }, { data: t }] = await Promise.all([
+        sb.from("crm_identities").select("meta,phone").eq("id", conv.identity_id).maybeSingle(),
+        sb.from("crm_zalo_friend_tasks").select("id,status,last_error").eq("zalo_uid", conv.external_id || "").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      setIdent(i); setFriendTask(t);
+    }
     if (conv.customer_id) {
       const { data: p } = await sb.from("crm_customers").select("*").eq("id", conv.customer_id).single(); setPerson(p as Person); setPhone(p?.phone || ""); setName(p?.name || "");
       const { data: l } = await sb.from("crm_v_leads").select("*").eq("person_id", conv.customer_id).order("created_at", { ascending: false }); setLeads((l as Lead[]) || []);
       const { data: o } = await sb.from("crm_orders").select("id,code,grand_total,status").eq("person_id", conv.customer_id).order("created_at", { ascending: false }); setOrders(o || []);
-      if (p?.phone) { const { data: t } = await sb.from("crm_zalo_friend_tasks").select("id,status").eq("phone", p.phone).order("created_at", { ascending: false }).limit(1).maybeSingle(); setFriendTask(t); }
+      if (p?.phone && !isZalo) { const { data: t } = await sb.from("crm_zalo_friend_tasks").select("id,status,last_error").eq("phone", p.phone).order("created_at", { ascending: false }).limit(1).maybeSingle(); setFriendTask(t); }
     } else {
       setPerson(null); setLeads([]); setOrders([]);
       setName(conv.display_name || "");
@@ -90,12 +100,41 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
     const j = await r.json(); if (j.existing) setLeadMsg("Khách đã có cơ hội đang mở — không tạo thêm."); setLeadBusy(false);
     load(); try { window.dispatchEvent(new Event("crm:leads-changed")); } catch {}
   };
+  // Gửi lời mời kết bạn: hội thoại Zalo → theo UID (không cần SĐT, không cần hồ sơ); kênh khác → theo SĐT của khách
   const requestZaloFriend = async () => {
-    if (!person?.phone) return;
-    if (friendTask?.status === "failed") { await sb.from("crm_zalo_friend_tasks").update({ status: "pending", attempts: 0, last_error: null }).eq("id", friendTask.id); load(); return; } // thử lại
-    await sb.from("crm_zalo_friend_tasks").insert({ customer_id: person.id, phone: person.phone, source_conversation_id: conv.id, greeting: `Xin chào ${person.name || ""}, em bên showroom THLED Đồng Nai, kết bạn để gửi báo giá và tư vấn ạ.`.slice(0, 150) });
+    if (!isZalo && !person?.phone) return;
+    if (friendTask && ["failed", "not_found"].includes(friendTask.status)) { await sb.from("crm_zalo_friend_tasks").update({ status: "todo", attempts: 0, last_error: null }).eq("id", friendTask.id); load(); return; } // thử lại
+    const who = person?.name || conv.display_name || "";
+    await sb.from("crm_zalo_friend_tasks").insert({ customer_id: person?.id || null, phone: isZalo ? null : person!.phone, zalo_uid: isZalo ? conv.external_id : null, source_conversation_id: conv.id, greeting: `Xin chào ${who}, em bên showroom THLED Đồng Nai, kết bạn để gửi báo giá và tư vấn ạ.`.slice(0, 150) });
     load();
   };
+  const unblockZalo = async () => {
+    if (!isZalo || !conv.external_id) return;
+    await sb.from("crm_zalo_actions").insert({ action: "unblock", zalo_uid: conv.external_id, conversation_id: conv.id, identity_id: conv.identity_id });
+    await sb.from("crm_conversations").update({ is_hidden: false, status: "open" }).eq("id", conv.id);
+    setIdent((i) => ({ ...(i || {}), meta: { ...(i?.meta || {}), blocked: false } })); load();
+  };
+  const blocked = !!ident?.meta?.blocked;
+  const isFriend = isZalo ? ident?.meta?.is_friend : friendTask?.status === "accepted";
+  const pending = !!friendTask && ["todo", "pending", "sent"].includes(friendTask.status);
+  const friendBox = (isZalo || person?.phone) && (
+    <div className="pt-2 border-t border-slate-100">
+      <div className="flex items-center justify-between mb-1"><b>Kết bạn Zalo</b>
+        {blocked ? <span className="lchip lchip-red">Đã chặn</span>
+          : isFriend === true ? <span className="lchip lchip-green">Đã là bạn</span>
+          : friendTask ? <span className={cn("lchip", friendTask.status === "failed" || friendTask.status === "not_found" ? "lchip-red" : friendTask.status === "sent" ? "lchip-blue" : "lchip-gray")}>{({ todo: "Đang chờ gửi", pending: "Đang chờ gửi", sent: "Đã gửi lời mời", failed: "Chưa gửi được", not_found: "Không tìm thấy Zalo", skipped: "Bỏ qua" } as Record<string, string>)[friendTask.status] || friendTask.status}</span>
+          : isZalo && ident?.meta?.is_friend === false ? <span className="lchip lchip-gray">Chưa kết bạn</span> : null}
+      </div>
+      {blocked ? <button className="btn w-full justify-center" onClick={unblockZalo}><Ban size={14} /> Bỏ chặn trên Zalo</button>
+        : isFriend === true ? <div className="text-xs text-slate-500">Đã là bạn trên Zalo{ident?.meta?.friend_checked_at && ` · kiểm tra ${dt(ident.meta.friend_checked_at, "HH:mm dd/MM")}`}</div>
+        : <>
+          <button className="btn w-full justify-center" onClick={requestZaloFriend} disabled={pending || (!isZalo && !person?.phone)}><UserPlus size={14} /> {friendTask && ["failed", "not_found"].includes(friendTask.status) ? "Thử gửi lại lời mời" : "Gửi lời mời kết bạn"}</button>
+          {friendTask?.last_error && ["failed", "not_found"].includes(friendTask.status) && <div className="text-xs text-red-600 mt-1">{friendTask.last_error}</div>}
+          {!isZalo && !person?.phone && <div className="text-xs text-slate-500 mt-1">Cần có SĐT để kết bạn.</div>}
+          {isZalo && isFriend === undefined && !friendTask && <div className="text-xs text-slate-400 mt-1">Chưa rõ đã là bạn chưa (worker sẽ kiểm tra trước khi gửi).</div>}
+        </>}
+    </div>
+  );
   const [aiBusy, setAiBusy] = useState(false); const [ai, setAi] = useState<{ summary?: string; emotion?: string; stage?: string; product_interest?: string | null; error?: string } | null>(null);
   useEffect(() => { setAi(conv.ai_summary ? { summary: conv.ai_summary, emotion: conv.emotion || undefined } : null); }, [conv.id, conv.ai_summary, conv.emotion]);
   const summarize = async () => {
@@ -118,6 +157,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           <input className="input" placeholder="Tên" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="input" placeholder="Số điện thoại" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <button className="btn btn-primary w-full justify-center" onClick={createPerson} disabled={busy}><Plus size={14} /> Tạo khách hàng</button>
+          {friendBox}
         </div>
       ) : (
         <div className="p-4 space-y-3 text-sm">
@@ -132,11 +172,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           {(person.emotion || conv.emotion) && <Row k="Cảm xúc">{person.emotion || conv.emotion}</Row>}
           <Row k="Nguồn">{({ automation: "Tự động từ hội thoại", manual: "Tạo tay", import: "Nhập file", web: "Website" } as Record<string, string>)[person.source_origin || ""] || person.source_origin || "—"}</Row>
 
-          <div className="pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between mb-1"><b>Kết bạn Zalo</b>{friendTask && <span className={cn("lchip", friendTask.status === "accepted" ? "lchip-green" : friendTask.status === "failed" ? "lchip-red" : friendTask.status === "sent" ? "lchip-blue" : "lchip-gray")}>{({ pending: "Đang chờ gửi", sent: "Đã gửi lời mời", accepted: "Đã là bạn", failed: "Chưa gửi được", skipped: "Bỏ qua" } as Record<string, string>)[friendTask.status] || friendTask.status}</span>}</div>
-            <button className="btn w-full justify-center" onClick={requestZaloFriend} disabled={!person.phone || (!!friendTask && friendTask.status !== "failed")}><UserPlus size={14} /> {friendTask?.status === "failed" ? "Thử gửi lại lời mời" : "Gửi lời mời kết bạn"}</button>
-            {!person.phone && <div className="text-xs text-slate-500 mt-1">Cần có SĐT để kết bạn.</div>}
-          </div>
+          {friendBox}
 
           {showLeads ? <div className="pt-2 border-t border-slate-100">
             <div className="flex items-center justify-between mb-1"><b>Cơ hội ({leads.filter((l) => l.status === "open").length} mở)</b><button className="btn px-2 py-0.5" title="Tạo cơ hội ở giai đoạn đầu" onClick={createLead} disabled={leadBusy}><Plus size={12} /></button></div>
