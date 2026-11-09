@@ -11,14 +11,17 @@ import { labelTone } from "@/lib/label-tone";
 import { Thread } from "./Thread";
 import { PersonPanel } from "./PersonPanel";
 
-type QuickFilter = "open" | "closed" | "all" | "unread" | "unanswered" | "important" | "overdue";
+type QuickFilter = "open" | "closed" | "all" | "unread" | "unanswered" | "important" | "overdue" | "hidden";
 const quick: { k: QuickFilter; l: string }[] = [
   { k: "open", l: "Hội thoại mở" }, { k: "closed", l: "Hội thoại đóng" }, { k: "all", l: "Tất cả" }, { k: "unread", l: "Chưa đọc" },
   { k: "unanswered", l: "Chưa trả lời" }, { k: "important", l: "Quan trọng" }, { k: "overdue", l: "Cảnh báo chưa trả lời" },
+  { k: "hidden", l: "Đã xoá/chặn" },
 ];
 
 export function InboxClient({ initial, labels, members, channels, knowledge }: { initial: Conversation[]; labels: Label[]; members: Pick<Member, "id" | "name" | "avatar_url" | "role" | "is_online">[]; channels: Channel[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
   const [convs, setConvs] = useState<Conversation[]>(initial);
+  // hội thoại đã xoá/chặn (is_hidden) chỉ tải khi mở bộ lọc "Đã xoá/chặn"
+  const [hiddenConvs, setHiddenConvs] = useState<Conversation[] | null>(null);
   const [sel, setSel] = useState<string | null>(initial[0]?.id ?? null);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0); // dòng đang chọn bằng phím khi tìm kiếm
@@ -93,12 +96,17 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         const id = (p.new as any)?.id || (p.old as any)?.id; if (!id) return;
         const { data } = await sb.from("crm_v_conversations").select("*").eq("id", id).single();
         if (!data) return;
-        setConvs((cs) => { const rest = cs.filter((c) => c.id !== id); return [data as Conversation, ...rest].sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || "")); });
+        const put = (cs: Conversation[]) => { const rest = cs.filter((c) => c.id !== id); return [data as Conversation, ...rest].sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || "")); };
+        setConvs(put); setHiddenConvs((h) => (h ? put(h) : h));
       }).subscribe();
     return () => { sb.removeChannel(ch); };
   }, []);
 
-  const list = useMemo(() => convs.filter((c) => {
+  useEffect(() => { if (qf !== "hidden") return; supabaseBrowser().from("crm_v_conversations").select("*").eq("is_hidden", true).order("last_message_at", { ascending: false, nullsFirst: false }).limit(200).then(({ data }) => setHiddenConvs((data as Conversation[]) || [])); }, [qf]);
+  const pool = qf === "hidden" ? hiddenConvs || [] : convs;
+  const list = useMemo(() => pool.filter((c) => {
+    if (qf === "hidden") return !!c.is_hidden && (!q || convName(c).toLowerCase().includes(q.toLowerCase()) || (c.person_phone || "").includes(q));
+    if (c.is_hidden) return false; // đã xoá/chặn → chỉ hiện ở bộ lọc riêng
     if (qf === "open" && c.status !== "open") return false;
     if (qf === "closed" && c.status !== "closed") return false;
     if (qf === "unread" && !c.unread_count) return false;
@@ -114,7 +122,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (f.lead && !matchLead(c, f.lead)) return false;
     if (q) { const s = q.toLowerCase(); return convName(c).toLowerCase().includes(s) || (c.person_phone || "").includes(s) || (c.last_message_text || "").toLowerCase().includes(s); }
     return true;
-  }), [convs, q, qf, f, leadTags, custOnly, isCustomer]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
+  }), [pool, q, qf, f, leadTags, custOnly, isCustomer]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
 
   // gộp: 1 khách (customer_id) = 1 dòng; hội thoại chưa có khách đứng riêng
   const groups = useMemo(() => {
@@ -125,10 +133,10 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       .sort((a, b) => (b.primary.last_message_at || "").localeCompare(a.primary.last_message_at || ""));
   }, [list, group]);
   const curGroup = groups.find((g) => g.key === sel) || groups.find((g) => g.convs.some((c) => c.id === sel)) || null;
-  const current = curGroup?.primary || convs.find((c) => c.id === sel) || null;
+  const current = curGroup?.primary || pool.find((c) => c.id === sel) || null;
   useEffect(() => { try { if (current?.id) window.history.replaceState(null, "", `/inbox?c=${current.id}`); } catch {} }, [current?.id]); // eslint-disable-line
   // mọi hội thoại của khách này (kể cả ngoài bộ lọc) để thread hiển thị đủ kênh
-  const siblings = useMemo(() => current ? (group && current.customer_id ? convs.filter((c) => c.customer_id === current.customer_id) : [current]) : [], [convs, current, group]);
+  const siblings = useMemo(() => current ? (group && current.customer_id ? pool.filter((c) => c.customer_id === current.customer_id && !!c.is_hidden === !!current.is_hidden) : [current]) : [], [pool, current, group]);
 
   return (
     <div className="h-full flex">
@@ -160,7 +168,8 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
           )}
         </div>
         <div className="flex-1 overflow-y-auto">
-          {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">Không có hội thoại</div>}
+          {qf === "hidden" && <div className="px-3 py-1.5 text-[11px] text-slate-500 bg-amber-50 border-b border-amber-100">Hội thoại đã xoá hoặc chặn. Mở hội thoại → menu ⋯ để khôi phục / bỏ chặn.</div>}
+          {list.length === 0 && <div className="p-6 text-center text-slate-400 text-sm">{qf === "hidden" && hiddenConvs === null ? "Đang tải…" : "Không có hội thoại"}</div>}
           {groups.map((g, gi) => { const c = g.primary; const types = Array.from(new Set(g.convs.map((x) => x.channel_type))); return (
             <a key={g.key} href={`/inbox?c=${c.id}`} onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; /* Ctrl/⌘+click, chuột giữa → mở tab mới */ e.preventDefault(); setSel(g.key); setMobileView("thread"); }} className={cn("conv-row", (sel === g.key || g.convs.some((x) => x.id === sel)) && "sel", q && gi === hi && "ring-2 ring-inset ring-blue-400")}>
               <div className={cn("relative shrink-0 self-start mt-0.5", c.kind === "group" && "ring-2 ring-emerald-400 rounded-full")}>{c.kind === "group" ? <GroupAvatar src={c.identity_avatar} name={convName(c)} members={(c as any).meta?.members} size={42} /> : <Avatar src={c.identity_avatar} name={convName(c)} size={42} />}<span className="absolute -bottom-0.5 -right-0.5 flex">{types.map((t) => <ChannelIcon key={t} type={t} size={14} />)}</span></div>

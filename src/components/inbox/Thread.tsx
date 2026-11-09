@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -205,6 +205,19 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     const alias = v.trim() && v.trim() !== conv.display_name ? v.trim() : null;
     await sb.from("crm_conversations").update({ meta: { ...((conv as any).meta || {}), alias } }).eq("id", conv.id);
   };
+  // Xoá hội thoại khỏi CRM = ẩn (is_hidden) toàn bộ hội thoại của khách này; tin nhắn vẫn lưu, xem lại ở bộ lọc "Đã xoá/chặn"
+  const hideConv = async (hide: boolean) => {
+    if (hide && !window.confirm("Xoá hội thoại này khỏi CRM?\nTin nhắn vẫn được lưu, tin mới sẽ không hiện và không báo. Xem lại ở bộ lọc “Đã xoá/chặn”.")) return;
+    await sb.from("crm_conversations").update({ is_hidden: hide, status: hide ? "closed" : "open" }).in("id", ids); setShowMore(false);
+  };
+  // Chặn trên Zalo: tạo hành động cho worker (api.blockUser) + ẩn hội thoại ngay
+  const zaloConv = all.find((c) => c.channel_type === "zalo_personal" && c.kind !== "group") || null;
+  const blockZalo = async (block: boolean) => {
+    if (!zaloConv?.external_id) return;
+    if (block && !window.confirm(`Chặn ${convName(conv)} trên Zalo?\nHọ sẽ không nhắn được cho số Zalo của shop nữa. Hội thoại bị ẩn khỏi CRM, bỏ chặn được ở bộ lọc “Đã xoá/chặn”.`)) return;
+    await sb.from("crm_zalo_actions").insert({ action: block ? "block" : "unblock", zalo_uid: zaloConv.external_id, conversation_id: zaloConv.id, identity_id: zaloConv.identity_id });
+    await sb.from("crm_conversations").update({ is_hidden: block, status: block ? "closed" : "open" }).in("id", ids); setShowMore(false);
+  };
   // thanh thao tác khi rê chuột lên tin: Trích dẫn · Chuyển tiếp · Chép · Chọn
   const renderActions = (m: Message) => {
     if (!(m.text || m.attachments?.length)) return null;
@@ -276,6 +289,13 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id); setShowMore(false); }}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} />{conv.is_important ? "Bỏ đánh dấu quan trọng" : "Đánh dấu quan trọng"}</button>
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id); setShowMore(false); }}><Check size={15} />{conv.status === "open" ? "Đóng hội thoại (đã xử lý xong)" : "Mở lại hội thoại"}</button>
             <a className="hidden md:flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer" onClick={() => setShowMore(false)}><ExternalLink size={15} />Mở ở tab mới</a>
+            <div className="my-1 border-t border-slate-100" />
+            {conv.is_hidden
+              ? <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => hideConv(false)}><RotateCcw size={15} />Khôi phục hội thoại</button>
+              : <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50 text-red-600" onClick={() => hideConv(true)}><Trash2 size={15} />Xoá hội thoại khỏi CRM</button>}
+            {zaloConv && (conv.is_hidden
+              ? <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => blockZalo(false)}><Ban size={15} />Bỏ chặn trên Zalo (nếu đã chặn)</button>
+              : <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50 text-red-600" title="Người này không nhắn được cho Zalo shop nữa; hội thoại bị ẩn" onClick={() => blockZalo(true)}><Ban size={15} />Chặn người này trên Zalo</button>)}
           </div>}
           {showLabels && <div className="absolute right-0 top-10 z-10 card p-2 w-56 max-h-72 overflow-auto shadow-lg"><div className="flex items-center justify-between text-xs text-slate-500 mb-1"><span>Gắn nhãn</span><button onClick={() => setShowLabels(false)} className="btn px-1.5 py-0.5"><X size={12} /></button></div>{labels.map((l) => <label key={l.id} className="flex items-center gap-2 py-1 text-sm cursor-pointer"><input type="checkbox" checked={convLabels.includes(l.name)} onChange={() => toggleLabel(l.name)} /><span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />{l.name}</label>)}</div>}
           {showAssign && <div className="absolute right-0 top-10 z-10 card p-2 w-56 shadow-lg">{members.map((m) => <button key={m.id} onClick={() => assign(m.id)} className="block w-full text-left py-1.5 px-2 rounded hover:bg-slate-50 text-sm">{m.name}</button>)}</div>}
