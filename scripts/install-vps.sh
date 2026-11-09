@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # THLED CRM — cài worker Zalo trên VPS Ubuntu 22.04/24.04 bằng 1 lệnh:
 #   curl -fsSL https://raw.githubusercontent.com/kitaro9x/thled-crm/main/scripts/install-vps.sh | bash
+# (máy chưa có curl: apt-get update -y && apt-get install -y curl trước)
 set -e
 echo "== 1/5 Cài Node.js 22 + git + pm2 =="
+# Ubuntu tối giản (Vietnix, một số nhà cung cấp VN) chưa có curl/git
+if ! command -v curl >/dev/null || ! command -v git >/dev/null; then apt-get update -y >/dev/null; apt-get install -y curl git ca-certificates >/dev/null; fi
 if ! command -v node >/dev/null || [ "$(node -v | cut -c2-3)" -lt 22 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
   apt-get install -y nodejs git >/dev/null
