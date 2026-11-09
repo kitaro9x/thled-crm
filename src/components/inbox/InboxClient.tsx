@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
@@ -24,8 +24,55 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [hi, setHi] = useState(0); // dòng đang chọn bằng phím khi tìm kiếm
   const [qf, setQf] = useState<QuickFilter>("open");
   const [showFilter, setShowFilter] = useState(false);
-  const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string }>({});
+  const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string; lead?: string }>({});
+  // tag lead theo khách: giai đoạn cơ hội đang mở + đã mua hàng (WON hoặc có đơn) — để nhìn danh sách là biết khách ở đâu trong phễu
+  const [leadTags, setLeadTags] = useState<Record<string, LeadTag>>({});
+  // nhãn "Không tạo cơ hội" (Cài đặt → Nhãn): Nhà cung cấp, Bạn bè, Gia đình, Shipper, Công nợ… → không hiện tag lead, không có mục Cơ hội
+  const skipLabels = useMemo(() => new Set(labels.filter((l) => l.skip_lead).map((l) => l.name)), [labels]);
+  const blockingLabel = useCallback((cs: Conversation[]) => cs.flatMap((c) => c.labels || []).find((l) => skipLabels.has(l)) || null, [skipLabels]);
+  const leadable = useCallback((cs: Conversation[]) => !blockingLabel(cs), [blockingLabel]);
+  // khách có BẤT KỲ hội thoại nào mang nhãn loại trừ → cả khách đó không phải khách hàng (đồng bộ với panel)
+  const blockedCust = useMemo(() => new Set(convs.filter((c) => !leadable([c])).map((c) => c.customer_id).filter(Boolean) as string[]), [convs, leadable]);
+  const isCustomer = useCallback((c: Conversation) => leadable([c]) && !(c.customer_id && blockedCust.has(c.customer_id)), [leadable, blockedCust]);
+  const custKey = useMemo(() => Array.from(new Set(convs.filter((c) => leadable([c])).map((c) => c.customer_id).filter(Boolean) as string[])).sort().join(","), [convs, leadable]);
+  const loadLeadTags = useCallback(async () => {
+    const ids = custKey ? custKey.split(",") : []; if (!ids.length) { setLeadTags({}); return; }
+    const sb = supabaseBrowser(); const out: Record<string, LeadTag> = {};
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const [{ data: ls }, { data: cs }] = await Promise.all([
+        sb.from("crm_v_leads").select("person_id,status,stage_name,stage_color,stage_kind,updated_at").in("person_id", chunk).order("updated_at", { ascending: false }),
+        sb.from("crm_customers").select("id,total_orders").in("id", chunk),
+      ]);
+      for (const c of cs || []) out[c.id] = { won: false, lost: false, orders: c.total_orders || 0 };
+      for (const l of ls || []) {
+        const t = (out[l.person_id!] ||= { won: false, lost: false, orders: 0 });
+        if (l.status === "won") t.won = true; else if (l.status === "lost") t.lost = true;
+        else if (!t.open) t.open = { name: l.stage_name || "", color: l.stage_color || "#64748b" }; // cơ hội mở cập nhật gần nhất
+      }
+    }
+    setLeadTags(out);
+  }, [custKey]);
+  useEffect(() => { loadLeadTags(); }, [loadLeadTags]);
+  useEffect(() => { // cơ hội / đơn hàng đổi → tải lại tag
+    const sb = supabaseBrowser();
+    const ch = sb.channel("inbox-leads").on("postgres_changes", { event: "*", schema: "public", table: "crm_leads" }, () => loadLeadTags()).on("postgres_changes", { event: "*", schema: "public", table: "crm_orders" }, () => loadLeadTags()).subscribe();
+    const onLocal = () => loadLeadTags(); window.addEventListener("crm:leads-changed", onLocal); // panel vừa đổi giai đoạn / tạo cơ hội
+    const onFocus = () => loadLeadTags(); window.addEventListener("focus", onFocus); // quay lại từ trang Cơ hội (Kanban) → tải lại tag
+    return () => { sb.removeChannel(ch); window.removeEventListener("crm:leads-changed", onLocal); window.removeEventListener("focus", onFocus); };
+  }, [loadLeadTags]);
+  // lọc theo lead: bought = WON/có đơn · open = đang có cơ hội mở (kể cả khách cũ mua lại) · lost = chỉ còn cơ hội thất bại · none = chưa có gì
+  const matchLead = (c: Conversation, want: string) => {
+    const t = c.customer_id ? leadTags[c.customer_id] : undefined; const bought = !!t && (t.won || t.orders > 0);
+    if (want === "bought") return bought; if (want === "open") return !!t?.open;
+    if (want === "lost") return !!t && t.lost && !t.open && !bought;
+    return !t || (!t.open && !bought && !t.lost);
+  };
   const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
+  // chip "Khách hàng": chỉ hiện hội thoại là khách (chưa gắn nhãn hoặc nhãn khách) — loại Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick "Không tạo cơ hội")
+  const [custOnly, setCustOnly] = useState(false);
+  useEffect(() => { try { setCustOnly(localStorage.getItem("inbox_cust_only") === "1"); } catch {} }, []);
+  const toggleCustOnly = () => { setCustOnly((v) => { try { localStorage.setItem("inbox_cust_only", v ? "0" : "1"); } catch {} return !v; }); };
   const [mobileView, setMobileView] = useState<"list" | "thread" | "panel">("list"); // điện thoại: từng màn
   const [showPanel, setShowPanel] = useState(true); // máy tính: ẩn/hiện cột hồ sơ khách
   useEffect(() => { try { const v = localStorage.getItem("inbox_panel"); if (v !== null) setShowPanel(v === "1"); } catch {} }, []);
@@ -58,14 +105,16 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (qf === "unanswered" && !(c.last_inbound_at && (!c.last_message_at || c.last_inbound_at >= c.last_message_at))) return false;
     if (qf === "important" && !c.is_important) return false;
     if (qf === "overdue" && !(c.last_inbound_at && c.unread_count > 0 && Date.now() - new Date(c.last_inbound_at).getTime() > 15 * 60000)) return false;
+    if (custOnly && !isCustomer(c)) return false;
     if (f.channel && c.channel_id !== f.channel) return false;
     if (f.label && !c.labels?.includes(f.label)) return false;
     if (f.assignee && c.assigned_to !== f.assignee) return false;
     if (f.hasPhone === "yes" && !c.person_phone) return false;
     if (f.hasPhone === "no" && c.person_phone) return false;
+    if (f.lead && !matchLead(c, f.lead)) return false;
     if (q) { const s = q.toLowerCase(); return convName(c).toLowerCase().includes(s) || (c.person_phone || "").includes(s) || (c.last_message_text || "").toLowerCase().includes(s); }
     return true;
-  }), [convs, q, qf, f]);
+  }), [convs, q, qf, f, leadTags, custOnly, isCustomer]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
 
   // gộp: 1 khách (customer_id) = 1 dòng; hội thoại chưa có khách đứng riêng
   const groups = useMemo(() => {
@@ -99,13 +148,14 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
-          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}</div>
+          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}<button onClick={toggleCustOnly} title="Chỉ hiện khách hàng: hội thoại chưa gắn nhãn hoặc nhãn khách. Ẩn Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick 'Không tạo cơ hội' trong Cài đặt → Nhãn). Kết hợp được với các chip khác." className={cn("fchip", custOnly && "on", custOnly && "ring-1 ring-emerald-400")}>{custOnly ? "✓ " : ""}Khách hàng</button></div>
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
               <select className="input" value={f.channel || ""} onChange={(e) => setF({ ...f, channel: e.target.value || undefined })}><option value="">Nguồn hội thoại</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
               <select className="input" value={f.label || ""} onChange={(e) => setF({ ...f, label: e.target.value || undefined })}><option value="">Thẻ</option>{labels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
               <select className="input" value={f.assignee || ""} onChange={(e) => setF({ ...f, assignee: e.target.value || undefined })}><option value="">Nhân viên</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
               <select className="input" value={f.hasPhone || ""} onChange={(e) => setF({ ...f, hasPhone: e.target.value || undefined })}><option value="">Trạng thái SĐT</option><option value="yes">Đã có SĐT</option><option value="no">Chưa có SĐT</option></select>
+              <select className="input col-span-2" value={f.lead || ""} onChange={(e) => setF({ ...f, lead: e.target.value || undefined })}><option value="">Trạng thái lead</option><option value="bought">Đã mua hàng</option><option value="open">Đang có cơ hội mở</option><option value="lost">Chỉ có cơ hội LOST</option><option value="none">Chưa có cơ hội</option></select>
             </div>
           )}
         </div>
@@ -121,7 +171,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
                   <div className={cn("text-[12px] shrink-0 tabular-nums", g.unread ? "text-blue-600 font-medium" : "text-slate-400")}>{ago(c.last_message_at)}</div>
                 </div>
                 <div className="flex items-center gap-2 mt-0.5"><div className={cn("truncate text-[13px] leading-5 flex-1", (c.last_message_text || "").startsWith("📵") ? "text-red-600 font-medium" : g.unread ? "text-slate-700" : "text-slate-500")}>{c.kind === "comment" && <MessageSquare size={12} className="inline mr-1 -mt-0.5 text-slate-400" />}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[11px] font-semibold px-1.5 min-w-[20px] h-5 inline-flex items-center justify-center shrink-0">{g.unread}</span>}</div>
-                {(c.person_phone || c.labels?.length || c.assignee_name) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
+                {(c.person_phone || c.labels?.length || c.assignee_name || (c.customer_id && leadTags[c.customer_id])) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.customer_id && leadTags[c.customer_id] && leadable(g.convs) && <LeadChips t={leadTags[c.customer_id]} />}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
               </div>
             </a>); })}
         </div>
@@ -137,8 +187,19 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       {/* cột 3: panel khách */}
       {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : showPanel ? "hidden md:flex" : "hidden")}>
         <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("thread")}><ArrowLeft size={16} /></button><div className="font-semibold">Hồ sơ khách</div></div>
-        <PersonPanel key={"p" + current.id} conv={current} members={members} />
+        <PersonPanel key={"p" + current.id} conv={current} members={members} leadBlockedBy={blockingLabel(siblings)} />
       </div>}
     </div>
   );
+}
+
+type LeadTag = { open?: { name: string; color: string }; won: boolean; lost: boolean; orders: number };
+/** Chip lead trên dòng hội thoại: "Đã mua hàng" (WON hoặc có đơn) · giai đoạn cơ hội đang mở (màu theo giai đoạn) · LOST khi chỉ còn cơ hội thất bại */
+function LeadChips({ t }: { t: LeadTag }) {
+  const bought = t.won || t.orders > 0;
+  return (<>
+    {bought && <span className="lchip lchip-green" title={t.orders > 0 ? `Đã có ${t.orders} đơn hàng` : "Đã có cơ hội WON"}>✓ Đã mua hàng</span>}
+    {t.open && <span className="lchip" style={{ background: t.open.color, color: "#fff" }} title="Cơ hội đang mở">{t.open.name}</span>}
+    {!bought && !t.open && t.lost && <span className="lchip lchip-red" title="Cơ hội đã thất bại">LOST</span>}
+  </>);
 }
