@@ -7,7 +7,7 @@
 | Web CRM | https://thled-crm.vercel.app (Vercel, project `thled-crm`, repo GitHub `kitaro9x/thled-crm` — public) | Push lên `main` là tự deploy. Luôn `npm run build` sạch trước khi push. |
 | Database | Supabase project `lighting-website` (`crnaymzkkoawgqcnpeub`), bảng `crm_*` | Dùng chung DB với web thled.vn. Migrations đã áp dụng: `crm_01`…`crm_15`. |
 | Facebook | Meta app **THLED CRM** (ID 1547504764063226), chế độ **Phát triển** | Page đã kết nối: *Đèn trang trí và quạt trần đèn Đồng Nai* (103305928499577). Webhook `/api/webhooks/facebook` đã xác minh. |
-| Zalo cá nhân | Worker `worker/zalo.mjs` trên VPS Vultr Singapore `207.148.73.195` (Ubuntu 24.04, Node 22, pm2 process `zalo`) | Tài khoản Zalo **Lyly** (uid 646165570850815279). Code tại `/opt/thled-crm`, env tại `/opt/thled-crm/.env.local`. |
+| Zalo cá nhân | Worker `worker/zalo.mjs` trên VPS **Vietnix** (IP Việt Nam) `14.225.206.108`, gói VPS SSD LINUX 1, Ubuntu 24.04, Node 22, pm2 process `zalo`, hostname `thled-zalocrm-idcp` (chuyển từ Vultr Singapore `207.148.73.195` ngày 09/11/2026 vì IP nước ngoài hay bị Zalo thu hồi phiên; Vultr đã dừng, huỷ sau vài ngày) | Tài khoản Zalo **Đèn Quạt Thled Đồng Nai** (uid 1579589065579277234). Code tại `/opt/thled-crm`, env tại `/opt/thled-crm/.env.local`. Portal: portal.vietnix.vn. |
 | Admin CRM | thled.vn@gmail.com, lecuong110296@gmail.com (role admin) | Thêm nhân viên: Cài đặt → Nhân sự & Quyền. |
 
 Luồng đã test thành công: FB nhận tin → inbox realtime → trả lời từ CRM → khách nhận; Zalo nhận/gửi (text + ảnh); bắt SĐT → tạo khách + cơ hội "Khởi tạo Lead" (nguồn *Hội thoại Fanpage & Zalo — bắt SĐT*).
@@ -25,14 +25,14 @@ DB dùng chung với web nên các bảng `crm_*` có sẵn mang cấu hình cũ
 ## 3. Vận hành VPS (PowerShell trên Windows)
 
 ```
-ssh root@207.148.73.195          # mật khẩu lấy trong Vultr → server → Password (gõ không hiện ký tự; tắt Unikey)
+ssh root@14.225.206.108          # mật khẩu root VPS Vietnix (gõ không hiện ký tự; tắt Unikey)
 pm2 logs zalo                    # xem log, Ctrl+C thoát
 pm2 restart zalo                 # khởi động lại worker
 pm2 status
 cd /opt/thled-crm && git pull && npm i && pm2 restart zalo   # cập nhật code mới
 cat /opt/thled-crm/.env.local    # xem env (URL, service key, CRON_SECRET, APP_URL)
 ```
-Cài lại từ máy trắng: `curl -fsSL https://raw.githubusercontent.com/kitaro9x/thled-crm/main/scripts/install-vps.sh | bash`
+Cài lại từ máy trắng (Ubuntu 24.04, **không** chọn mẫu có đuôi EOL/Aapanel/1Panel): `apt-get update -y && apt-get install -y curl` rồi `curl -fsSL https://raw.githubusercontent.com/kitaro9x/thled-crm/main/scripts/install-vps.sh | bash`. Có sẵn 4 dòng env thì tạo thẳng `/opt/thled-crm/.env.local` trước khi chạy script để khỏi phải nhập tay. Chỉ chạy **1 worker** tại một thời điểm (tắt máy cũ `pm2 stop zalo && pm2 save` trước khi bật máy mới), nếu không 2 worker giành phiên và gửi trùng tin.
 
 Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo lưu trong `crm_zalo_worker`; nếu mất (đăng xuất trên điện thoại, Zalo bắt đăng nhập lại) → CRM → Cài đặt → Kết nối kênh → *Lấy mã QR đăng nhập* → quét lại.
 
@@ -41,8 +41,8 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 - Chỉ dùng **số phụ** (Lyly), không dùng Zalo chính. Không bấm "đăng xuất thiết bị khác" trên điện thoại.
 - Kết bạn tự động: `friend_daily_limit` mặc định 15/ngày, delay 20–60s. Tuần đầu nên 5–10.
 - Nếu Zalo báo hạn chế → tắt kết bạn vài ngày (đặt limit = 0), không cố.
-- VPS IP Singapore → đôi khi Zalo hỏi xác minh trên điện thoại, xác nhận "Đó là tôi".
-- Phương án dự phòng: chạy worker trên máy tính cửa hàng (IP Việt Nam) — code không đổi.
+- Đã chuyển sang VPS Việt Nam (Vietnix) 09/11/2026 để giảm việc Zalo thu hồi phiên; vẫn có thể bị hỏi "Đó là tôi" trên điện thoại khi đổi IP.
+- Phương án dự phòng: chạy worker trên máy tính cửa hàng — code không đổi.
 
 ## 5. Việc còn lại
 
@@ -68,4 +68,8 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 - API gửi: Zalo không *online* hoặc heartbeat > 3 phút → trả lỗi 409 ngay (không xếp hàng). Hỗ trợ `retry_of` để gửi lại tin lỗi (xoá bản lỗi cũ).
 - Inbox: bong bóng lỗi màu đỏ + lý do + nút **Gửi lại**; banner vàng trên ô nhập khi Zalo mất kết nối (kèm link Cài đặt → Kết nối kênh).
 
-**Xử lý khi gặp lại**: CRM → Cài đặt → Kết nối kênh → QR hiện ra → quét bằng Zalo Lyly trên điện thoại → trạng thái *online* → vào từng tin đỏ bấm **Gửi lại**. Nếu QR không hiện sau 1 phút: `ssh root@207.148.73.195` → `pm2 logs zalo`.
+**Xử lý khi gặp lại**: CRM → Cài đặt → Kết nối kênh → QR hiện ra → quét bằng Zalo Lyly trên điện thoại → trạng thái *online* → vào từng tin đỏ bấm **Gửi lại**. Nếu QR không hiện sau 1 phút: `ssh root@14.225.206.108` → `pm2 logs zalo`.
+
+## 8. Việc cần làm sau khi chuyển VPS (09/11/2026)
+- Huỷ VPS Vultr `207.148.73.195` sau 2–3 ngày nếu Vietnix ổn (đang `pm2 stop`).
+- **Đổi khoá** `SUPABASE_SERVICE_ROLE_KEY` và `CRON_SECRET`: đã lộ qua ảnh chụp màn hình khi cài. Thứ tự: Supabase → tạo key mới → cập nhật Vercel (CRM + web thled.vn nếu dùng chung) → `/opt/thled-crm/.env.local` trên Vietnix → `pm2 restart zalo` → thu hồi key cũ. Làm lúc vắng khách.
