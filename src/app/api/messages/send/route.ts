@@ -11,8 +11,10 @@ export async function POST(req: NextRequest) {
   const sb = await supabaseServer();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { conversation_id, text: text0, attachments = [], scheduled_at, reply_to } = await req.json();
+  const { conversation_id, text: text0, attachments = [], scheduled_at, reply_to, retry_of } = await req.json();
   const db = supabaseAdmin();
+  // gửi lại 1 tin lỗi: xoá bản ghi lỗi cũ (chỉ khi nó thật sự là tin lỗi) để không hiện 2 bong bóng
+  const dropFailed = async () => { if (retry_of) await db.from("crm_messages").delete().eq("id", retry_of).eq("status", "failed"); };
   let text: string = text0;
   // trích dẫn (trả lời 1 tin): lấy tin gốc → quote cho Zalo (worker gửi quote thật), FB không có quote → chèn dòng «…» vào đầu
   let quote: any = null;
@@ -61,6 +63,7 @@ export async function POST(req: NextRequest) {
         const res = await sendRetry(undefined, a.url, (["image", "video", "audio"].includes(a.type) ? a.type : "file") as any);
         lastId = res.message_id;
       }
+      await dropFailed();
       await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text: text || null, attachments, external_msg_id: lastId, sender_member_id: user.id, status: "sent", raw: quote ? { quote: { msg: quote.msg, thumb: quote.thumb, kind: quote.kind, name: quote.name, from: quote.from, msg_id: quote.msg_id } } : null });
       return NextResponse.json({ ok: true });
     } catch (e: any) {
@@ -68,9 +71,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Zalo cá nhân: worker phải đang đăng nhập — phiên hết hạn / worker tắt thì báo lỗi ngay thay vì xếp hàng rồi "đang gửi" mãi
+  if (channel?.type === "zalo_personal") {
+    const { data: w } = await db.from("crm_zalo_worker").select("state,heartbeat_at,last_error").eq("id", 1).maybeSingle();
+    const stale = !w?.heartbeat_at || Date.now() - new Date(w.heartbeat_at).getTime() > 3 * 60000;
+    if (w?.state !== "online" || stale) {
+      const why = w?.state === "need_qr" || w?.state === "qr_ready" ? "Zalo chưa đăng nhập — vào Cài đặt → Kết nối kênh → quét mã QR bằng điện thoại Zalo của shop" : stale ? `Worker Zalo không phản hồi (lần cuối ${w?.heartbeat_at ? new Date(w.heartbeat_at).toLocaleString("vi-VN") : "chưa có"}) — kiểm tra VPS (pm2 status zalo)` : `Worker Zalo đang ${w?.state || "offline"}`;
+      return NextResponse.json({ error: why + (w?.last_error ? ` · ${w.last_error}` : "") }, { status: 409 });
+    }
+  }
   // Zalo cá nhân / kênh khác: xếp hàng, worker gửi và ghi crm_messages
   const { error: qErr } = await db.from("crm_outbox").insert({ conversation_id, channel_id: conv.channel_id, external_id: conv.external_id, text: text || "", attachments, sent_by: user.id, source: "manual", quote });
   if (qErr) return NextResponse.json({ error: "Không xếp hàng gửi được: " + qErr.message }, { status: 400 });
+  await dropFailed();
   await db.from("crm_messages").insert({ conversation_id, direction: "out", type: attachments.length ? attachments[0].type : "text", text: text || null, attachments, sender_member_id: user.id, status: "queued", raw: quote ? { quote: { msg: quote.msg, thumb: quote.thumb, kind: quote.kind, name: quote.name, from: quote.from, msg_id: quote.msg_id } } : null });
   return NextResponse.json({ ok: true, queued: true });
 }

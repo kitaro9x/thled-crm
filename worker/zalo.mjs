@@ -106,6 +106,37 @@ async function zaloSend(api, uid, text, attachments, ttype = ThreadType.User, qu
 
 async function setWorker(patch) { await sb.from("crm_zalo_worker").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", 1); }
 
+/** Lỗi do phiên đăng nhập Zalo hết hạn/bị thu hồi (zpw_sek = session key của Zalo Web) → phải quét QR lại */
+const isSessionError = (e) => /zpw_sek|zpsid|secret ?key|đăng nhập|login|phiên|session|unauthori|chưa xác thực|status code 40[13]/i.test(String(e?.message || e || ""));
+/** Phiên Zalo chết: báo CRM cần QR (Cài đặt → Kết nối kênh hiện QR), kênh = disconnected, thoát để pm2 khởi động lại vào luồng QR */
+async function sessionDead(reason) {
+  console.error("Phiên Zalo hết hạn:", reason);
+  await setWorker({ state: "need_qr", qr_image: null, last_error: `Phiên Zalo hết hạn (${String(reason).slice(0, 160)}) — cần quét QR đăng nhập lại` });
+  await sb.from("crm_channels").update({ status: "disconnected", last_error: "Phiên Zalo hết hạn — vào Cài đặt → Kết nối kênh quét QR lại" }).eq("type", "zalo_personal");
+  process.exit(0);
+}
+/** Kiểm tra phiên còn sống thật không (gọi API nhẹ) — heartbeat không đủ vì vòng lặp vẫn chạy khi phiên đã chết */
+async function checkSession(api) {
+  try { await api.fetchAccountInfo(); return true; }
+  catch (e) { if (isSessionError(e)) { await sessionDead(e.message); } else console.error("checkSession:", e.message); return false; }
+}
+/** Tin trong crm_messages đang "queued" (CRM hiện "đang gửi") ứng với 1 outbox thất bại → "failed" + lưu lý do vào raw.error */
+async function markMessageFailed(o, err) {
+  let q = sb.from("crm_messages").select("id,raw").eq("conversation_id", o.conversation_id).eq("direction", "out").eq("status", "queued").gte("created_at", new Date(new Date(o.created_at).getTime() - 60000).toISOString());
+  q = o.text ? q.eq("text", o.text) : q.is("text", null);
+  const { data } = await q.order("created_at").limit(1);
+  for (const m of data || []) await sb.from("crm_messages").update({ status: "failed", raw: { ...(m.raw || {}), error: String(err).slice(0, 300) } }).eq("id", m.id);
+}
+/** Khởi động: đồng bộ lại tin còn "đang gửi" của các outbox đã thất bại/đã gửi trước đó (worker chết giữa chừng, hoặc code cũ không đánh dấu) */
+async function reconcileQueued() {
+  try {
+    const since = new Date(Date.now() - 7 * 86400000).toISOString();
+    const { data: failed } = await sb.from("crm_outbox").select("id,conversation_id,text,created_at,error").eq("status", "failed").gte("created_at", since);
+    for (const o of failed || []) await markMessageFailed(o, o.error || "Gửi thất bại");
+    if (failed?.length) console.log("reconcile: đánh dấu lỗi", failed.length, "tin");
+  } catch (e) { console.error("reconcileQueued", e.message); }
+}
+
 // Gói Vercel Hobby chỉ cho cron 1 lần/ngày → worker gọi job mỗi phút thay thế
 async function runCronJobs() {
   try { await fetch(`${APP_URL}/api/cron/jobs`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } }); } catch (e) { console.error("cron err", e.message); }
@@ -184,6 +215,8 @@ async function main() {
   // đảm bảo kênh tồn tại
   await sb.from("crm_channels").upsert({ type: "zalo_personal", external_id: String(own), name, status: "connected" }, { onConflict: "type,external_id" });
   console.log("Online:", name, own);
+  await reconcileQueued();
+  setInterval(() => checkSession(api), 5 * 60000); // mỗi 5 phút: phiên chết → need_qr + thoát (pm2 khởi động lại vào luồng QR)
 
   // sửa các hội thoại bị gán nhầm tên tài khoản của mình (lỗi cũ khi mình nhắn trước)
   try {
@@ -368,6 +401,10 @@ async function main() {
       await ingest({ channelType: "zalo_personal", channelExternalId: String(own), senderExternalId: String(uid), senderName, senderAvatar: avatar, senderPhone: phone, zaloLabels: labelByUid.get(String(uid)) || [], text, type, attachments, externalMsgId: String(d.msgId), sentAt: new Date(Number(d.ts)).toISOString(), direction: isSelf ? "out" : "in", raw: { msgType: mt, content: c, zq: { cliMsgId: d.cliMsgId, uidFrom: d.uidFrom, ts: d.ts, ttl: d.ttl || 0, propertyExt: d.propertyExt || null }, ...(extraRaw || {}) } });
     } catch (e) { console.error("msg err", e.message); }
   });
+  // websocket đóng hẳn (zca-js hết lượt thử lại) → thoát để pm2 khởi động lại; lỗi phiên → cần QR
+  api.listener.on("closed", async (code, reason) => { console.error("listener closed", code, reason); await setWorker({ last_error: `Listener đóng (${code} ${reason || ""}) — đang khởi động lại` }); await checkSession(api); process.exit(1); });
+  api.listener.on("disconnected", (code, reason) => console.log("listener disconnected", code, reason || ""));
+  api.listener.on("error", (e) => console.error("listener error", e?.message || e));
   api.listener.start();
 
   // Nhận tin mới trong crm_outbox tức thì qua realtime (thay vì chờ vòng quét)
@@ -392,7 +429,12 @@ async function main() {
           await sb.from("crm_messages").update({ status: "sent" }).eq("conversation_id", o.conversation_id).eq("status", "queued");
           if (o.source !== "manual") await sb.from("crm_messages").insert({ conversation_id: o.conversation_id, direction: "out", type: "text", text: o.text, attachments: o.attachments, status: "sent" });
           await sleep(rnd(2000, 5000));
-        } catch (e) { await sb.from("crm_outbox").update({ status: "failed", error: e.message }).eq("id", o.id); }
+        } catch (e) {
+          console.error("outbox fail", o.id, e.message);
+          await sb.from("crm_outbox").update({ status: "failed", error: e.message }).eq("id", o.id);
+          await markMessageFailed(o, e.message); // CRM hiện "lỗi" + lý do thay vì "đang gửi" mãi
+          if (isSessionError(e)) await checkSession(api); // phiên chết → need_qr + thoát
+        }
       }
 
       // kết bạn — giới hạn/ngày

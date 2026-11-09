@@ -4,7 +4,7 @@ import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, 
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
-import { cn, dt, convName } from "@/lib/utils";
+import { cn, dt, ago, convName } from "@/lib/utils";
 import { LinkPreview, firstUrl } from "./LinkPreview";
 import { ForwardDialog } from "./ForwardDialog";
 import { BankCard } from "./BankCard";
@@ -59,6 +59,17 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   };
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // trạng thái worker Zalo: phiên hết hạn / worker tắt → báo ngay trên khung chat (tin sẽ không đi được)
+  const [zw, setZw] = useState<{ state?: string; heartbeat_at?: string | null; last_error?: string | null } | null>(null);
+  useEffect(() => {
+    if (!all.some((c) => c.channel_type === "zalo_personal")) return;
+    sb.from("crm_zalo_worker").select("state,heartbeat_at,last_error").eq("id", 1).maybeSingle().then(({ data }) => setZw(data));
+    const ch = sb.channel("zw-thread").on("postgres_changes", { event: "UPDATE", schema: "public", table: "crm_zalo_worker" }, (p) => setZw(p.new as any)).subscribe();
+    const t = setInterval(() => setZw((w) => (w ? { ...w } : w)), 60000); // tính lại "quá hạn heartbeat" mỗi phút
+    return () => { sb.removeChannel(ch); clearInterval(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv.id]);
+  const zaloDown = target.channel_type === "zalo_personal" && zw && (zw.state !== "online" || !zw.heartbeat_at || Date.now() - new Date(zw.heartbeat_at).getTime() > 3 * 60000);
   const [schedule, setSchedule] = useState<string>("");
   const [showLabels, setShowLabels] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
@@ -155,15 +166,22 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     if (!text.trim() && !files.length) return; setSending(true); setErr(null);
     let attachments: { type: string; url: string; name: string }[] = [];
     try { setUploading(true); attachments = await uploadAll(); } catch (e: any) { setErr(e.message); setSending(false); setUploading(false); return; } finally { setUploading(false); }
-    // hiện tin ngay (optimistic), server xác nhận sau; realtime sẽ thay bằng bản thật
-    const tmpId = "tmp-" + Date.now(); const body = text.trim(); const sched = schedule; const rt = replyTo;
-    if (!sched) setMsgs((m) => [...m, { id: tmpId, conversation_id: target.id, direction: "out", type: attachments[0]?.type || "text", text: body || null, attachments, status: "queued", sent_at: new Date().toISOString(), created_at: new Date().toISOString(), raw: rt ? { quote: quoteOf(rt) } : null } as any]);
+    const body = text.trim(); const sched = schedule; const rt = replyTo;
     setText(""); setSchedule(""); setFiles([]); setReplyTo(null);
-    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: target.id, text: body || undefined, attachments, scheduled_at: sched || undefined, reply_to: rt?.id || undefined }) });
-    const j = await r.json(); setSending(false);
-    if (!r.ok) { setErr(j.error || "Gửi thất bại"); setMsgs((m) => m.map((x) => (x.id === tmpId ? { ...x, status: "failed" } : x))); return; }
-    if (!sched) setMsgs((m) => m.map((x) => (x.id === tmpId ? { ...x, status: "sent" } : x)));
+    await post({ conversation_id: target.id, text: body || undefined, attachments, scheduled_at: sched || undefined, reply_to: rt?.id || undefined, quote: rt ? quoteOf(rt) : null });
   };
+  /** Gọi API gửi; hiện tin ngay (optimistic), server xác nhận sau; lỗi → bong bóng "lỗi" kèm lý do + nút Gửi lại */
+  const post = async (p: { conversation_id: string; text?: string; attachments: any[]; scheduled_at?: string; reply_to?: string; quote?: any; retry_of?: string }) => {
+    const tmpId = "tmp-" + Date.now(); const sched = p.scheduled_at;
+    if (!sched) setMsgs((m) => [...m, { id: tmpId, conversation_id: p.conversation_id, direction: "out", type: p.attachments[0]?.type || "text", text: p.text || null, attachments: p.attachments, status: "queued", sent_at: new Date().toISOString(), created_at: new Date().toISOString(), raw: p.quote ? { quote: p.quote } : null } as any]);
+    const r = await fetch("/api/messages/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: p.conversation_id, text: p.text, attachments: p.attachments, scheduled_at: sched, reply_to: p.reply_to, retry_of: p.retry_of }) });
+    const j = await r.json(); setSending(false);
+    if (!r.ok) { setErr(j.error || "Gửi thất bại"); setMsgs((m) => m.map((x) => (x.id === tmpId ? { ...x, status: "failed", raw: { ...((x as any).raw || {}), error: j.error || "Gửi thất bại" } } : x))); return; }
+    if (!sched) setMsgs((m) => m.map((x) => (x.id === tmpId ? { ...x, status: "sent" } : x)));
+    if (p.retry_of) setMsgs((m) => m.filter((x) => x.id !== p.retry_of)); // bản lỗi cũ đã xoá (server) hoặc là tin tạm
+  };
+  /** Gửi lại tin lỗi: giữ nguyên nội dung/đính kèm; tin tạm (tmp-) chỉ cần gửi lại, tin trong DB → server xoá bản lỗi */
+  const retry = (m: Message) => { setSending(true); setErr(null); const q = (m as any).raw?.quote; const orig = q?.msg_id ? msgs.find((x) => x.external_msg_id === q.msg_id) : null; post({ conversation_id: m.conversation_id, text: m.text || undefined, attachments: m.attachments || [], quote: q || null, reply_to: orig?.id, retry_of: m.id.startsWith("tmp-") ? undefined : m.id }); if (m.id.startsWith("tmp-")) setMsgs((x) => x.filter((y) => y.id !== m.id)); };
   const toggleLabel = async (name: string) => {
     const next = convLabels.includes(name) ? convLabels.filter((l) => l !== name) : [...convLabels, name];
     setConvLabels(next); await sb.from("crm_conversations").update({ labels: next }).eq("id", conv.id);
@@ -271,7 +289,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <div key={m.id} id={"msg-" + m.id} onTouchStart={() => lpStart(m.id)} onTouchEnd={lpEnd} onTouchMove={lpEnd} onContextMenu={(e) => { if (isMobile) e.preventDefault(); }} className={cn("flex group items-center gap-1.5 rounded-xl transition py-0.5 select-none md:select-text", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && renderActions(m)}
-            <div className={cn("max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
+            <div className={cn("max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (m.status === "failed" ? "bg-red-600 text-white rounded-br-sm" : byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <img key={i} src={a.url} alt="" className="rounded-lg max-h-60 mb-1 cursor-zoom-in hover:opacity-95" onLoad={() => { if (atBottom) jumpBottom(); }} onClick={() => { const k = allImages.findIndex((x) => x.url === a.url); setLb(k >= 0 ? k : 0); }} /> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[12px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
               {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const target = q.msg_id ? msgs.find((x) => x.external_msg_id === q.msg_id) : null; return (
@@ -282,7 +300,8 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
               {m.direction === "out" && <div className={cn("text-[11px] font-medium opacity-85 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 Business Suite (AI Meta / trả lời ngoài CRM)" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : (m as any).raw?.contact ? <ContactCard c={(m as any).raw.contact} /> : (m as any).raw?.call ? <CallCard call={(m as any).raw.call} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
-              <div className={cn("text-[11px] mt-1 flex items-center gap-1 tabular-nums", m.direction === "out" ? "text-blue-100/90" : "text-slate-500")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && " · lỗi"}</div>
+              <div className={cn("text-[11px] mt-1 flex items-center gap-1 tabular-nums", m.direction === "out" ? "text-blue-100/90" : "text-slate-500")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && <span className="text-red-100 font-semibold">· chưa gửi được</span>}{m.direction === "out" && m.status === "failed" && <button onClick={() => retry(m)} disabled={sending} className="ml-1 rounded bg-white/90 text-red-700 px-1.5 py-0.5 font-semibold hover:bg-white disabled:opacity-60">Gửi lại</button>}</div>
+              {m.status === "failed" && (m as any).raw?.error && <div className="text-[11px] mt-0.5 text-red-100/90 break-words">{String((m as any).raw.error)}</div>}
             </div>
             {m.direction !== "out" && renderActions(m)}
           </div>
@@ -293,6 +312,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
       <div className="bg-white border-t border-slate-200 p-3">
         {conv.scheduled_message && <div className="text-xs text-amber-700 mb-1 flex items-center gap-1"><Clock size={12} /> Tin hẹn giờ: “{conv.scheduled_message.text}” lúc {dt(conv.scheduled_message.send_at, "HH:mm dd/MM")}</div>}
         {err && <div className="text-xs text-red-600 mb-1">{err}</div>}
+        {zaloDown && <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 mb-2">⚠️ Zalo đang mất kết nối ({zw?.state === "need_qr" || zw?.state === "qr_ready" ? "phiên đăng nhập hết hạn, cần quét QR lại" : zw?.state !== "online" ? `worker ${zw?.state || "offline"}` : "worker không phản hồi"}{zw?.heartbeat_at ? `, hoạt động lần cuối ${ago(zw.heartbeat_at)}` : ""}) — tin gửi đi sẽ không tới khách. <a href="/settings/channels" className="underline font-semibold">Cài đặt → Kết nối kênh</a>{zw?.last_error ? <div className="opacity-80 mt-0.5">{zw.last_error}</div> : null}</div>}
         {multi && <div className="flex items-center gap-1 mb-2 text-xs text-slate-500">Trả lời qua:{all.map((c) => <button key={c.id} onClick={() => setTarget(c)} className={cn("chip border flex items-center gap-1", target.id === c.id ? (c.channel_type === "zalo_personal" ? "bg-green-600 text-white border-green-600" : "bg-blue-600 text-white border-blue-600") : "bg-white border-slate-200 text-slate-600")}><ChannelIcon type={c.channel_type} size={12} />{c.kind === "group" ? "Nhóm Zalo" : c.channel_type === "zalo_personal" ? "Zalo" : c.kind === "comment" ? "FB bình luận" : "Messenger"}</button>)}</div>}
         {slashItems.length > 0 && <div className="mb-2 card shadow-lg max-h-64 overflow-auto p-1">
           <div className="px-2 py-1 text-[11px] text-slate-400">Trả lời nhanh — ↑↓ chọn, Enter/Tab chèn, Esc huỷ</div>

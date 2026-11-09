@@ -59,3 +59,13 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 - Ai nhận: mọi nhân sự đang hoạt động đã bật; hội thoại có nhãn *Chỉ Admin thấy* → chỉ admin. Tắt toàn hệ thống: `crm_settings.notifications.push_enabled=false`; chỉ báo người được giao: `only_assigned=true`.
 - Khoá VAPID trong `crm_secrets` (service role). Thiết bị hết hạn (410/404) tự xoá khỏi `crm_push_subscriptions`.
 - Bấm thông báo → mở `/inbox?c=<id>` đúng hội thoại.
+
+## 7. Tin Zalo "đang gửi" mãi / không gửi được — thêm 09/11/2026
+**Sự cố**: 11:51 09/11 phiên đăng nhập Zalo của worker bị thu hồi (lỗi Zalo trả về `zpw_sek bị thiếu hoặc không đúng`). Worker vẫn báo *online* (heartbeat chỉ chứng tỏ vòng lặp còn chạy), mọi tin gửi từ CRM rơi vào `crm_outbox.status=failed` nhưng `crm_messages` vẫn `queued` → CRM hiện "đang gửi" mãi; tin khách nhắn tới cũng không vào CRM.
+
+**Đã sửa (code)**:
+- Worker: gửi lỗi → đánh dấu tin tương ứng `failed` + lưu lý do vào `raw.error`; lỗi phiên → tự kiểm tra `fetchAccountInfo`, nếu chết → `state=need_qr`, kênh `disconnected`, thoát để pm2 khởi động lại vào luồng QR. Kiểm tra phiên mỗi 5 phút; websocket đóng hẳn → thoát để pm2 khởi động lại. Khởi động → đồng bộ lại các tin còn "đang gửi" của outbox đã thất bại.
+- API gửi: Zalo không *online* hoặc heartbeat > 3 phút → trả lỗi 409 ngay (không xếp hàng). Hỗ trợ `retry_of` để gửi lại tin lỗi (xoá bản lỗi cũ).
+- Inbox: bong bóng lỗi màu đỏ + lý do + nút **Gửi lại**; banner vàng trên ô nhập khi Zalo mất kết nối (kèm link Cài đặt → Kết nối kênh).
+
+**Xử lý khi gặp lại**: CRM → Cài đặt → Kết nối kênh → QR hiện ra → quét bằng Zalo Lyly trên điện thoại → trạng thái *online* → vào từng tin đỏ bấm **Gửi lại**. Nếu QR không hiện sau 1 phút: `ssh root@207.148.73.195` → `pm2 logs zalo`.
