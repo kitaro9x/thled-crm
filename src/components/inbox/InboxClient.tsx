@@ -11,11 +11,15 @@ import { labelTone } from "@/lib/label-tone";
 import { Thread } from "./Thread";
 import { PersonPanel } from "./PersonPanel";
 
-type QuickFilter = "open" | "closed" | "all" | "unread" | "unanswered" | "important" | "overdue";
-const quick: { k: QuickFilter; l: string }[] = [
+type QuickFilter = "open" | "closed" | "all" | "unread" | "unanswered" | "important" | "overdue" | "customer";
+const quick: { k: QuickFilter; l: string; t?: string }[] = [
   { k: "open", l: "Hội thoại mở" }, { k: "closed", l: "Hội thoại đóng" }, { k: "all", l: "Tất cả" }, { k: "unread", l: "Chưa đọc" },
   { k: "unanswered", l: "Chưa trả lời" }, { k: "important", l: "Quan trọng" }, { k: "overdue", l: "Cảnh báo chưa trả lời" },
+  { k: "customer", l: "Khách hàng", t: "Hội thoại không gắn nhãn Nhà cung cấp, Gia đình, Bạn bè, Công nợ mẹ, Thầu, Shipper (kể cả chưa gắn nhãn nào)" },
 ];
+// nhãn "không phải khách": hội thoại mang 1 trong các nhãn này bị loại khỏi chip "Khách hàng"
+const NON_CUSTOMER = /nhà cung cấp|gia đình|bạn bè|công nợ mẹ|thầu|shiper|shipper/i;
+const isCustomerConv = (c: Conversation) => !(c.labels || []).some((l) => NON_CUSTOMER.test(l));
 
 export function InboxClient({ initial, labels, members, channels, knowledge }: { initial: Conversation[]; labels: Label[]; members: Pick<Member, "id" | "name" | "avatar_url" | "role" | "is_online">[]; channels: Channel[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
   const [convs, setConvs] = useState<Conversation[]>(initial);
@@ -58,6 +62,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (qf === "unanswered" && !(c.last_inbound_at && (!c.last_message_at || c.last_inbound_at >= c.last_message_at))) return false;
     if (qf === "important" && !c.is_important) return false;
     if (qf === "overdue" && !(c.last_inbound_at && c.unread_count > 0 && Date.now() - new Date(c.last_inbound_at).getTime() > 15 * 60000)) return false;
+    if (qf === "customer" && !isCustomerConv(c)) return false;
     if (f.channel && c.channel_id !== f.channel) return false;
     if (f.label && !c.labels?.includes(f.label)) return false;
     if (f.assignee && c.assigned_to !== f.assignee) return false;
@@ -99,7 +104,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
-          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}</div>
+          <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} title={x.t} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}</div>
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
               <select className="input" value={f.channel || ""} onChange={(e) => setF({ ...f, channel: e.target.value || undefined })}><option value="">Nguồn hội thoại</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
