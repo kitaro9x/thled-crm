@@ -11,7 +11,7 @@ export type RuleEvent =
 
 export interface Member { id: string; name: string; email?: string | null; avatar_url?: string | null; role: Role; is_active: boolean; is_online: boolean; zalo_uid?: string | null; }
 export interface Channel { id: string; type: ChannelType; external_id: string; name: string; avatar_url?: string | null; status: string; settings: Record<string, unknown>; last_error?: string | null; }
-export interface Label { id: string; name: string; color: string; sort_order: number; scope: string; }
+export interface Label { id: string; name: string; color: string; sort_order: number; scope: string; skip_lead?: boolean; /* "Không tạo cơ hội": hội thoại mang nhãn này không bắt SĐT/tạo lead, ẩn mục Cơ hội */ }
 export interface Person {
   id: string; name?: string | null; phone?: string | null; email?: string | null; gender?: string | null; zalo?: string | null;
   avatar_url?: string | null; address?: string | null; assigned_to?: string | null; labels: string[]; tags?: string[];

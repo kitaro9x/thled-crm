@@ -11,7 +11,9 @@ import { money, dt, cn } from "@/lib/utils";
 import { CustomerName, OldNames } from "@/components/CustomerName";
 import { oldNames } from "@/lib/customer-name";
 
-export function PersonPanel({ conv, members }: { conv: Conversation; members: { id: string; name: string }[] }) {
+/** leadBlockedBy: tên nhãn "Không tạo cơ hội" (Nhà cung cấp, Bạn bè, Gia đình, Shipper, Công nợ…) mà hội thoại đang mang → ẩn mục Cơ hội */
+export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Conversation; members: { id: string; name: string }[]; leadBlockedBy?: string | null }) {
+  const showLeads = !leadBlockedBy;
   const sb = supabaseBrowser();
   const [person, setPerson] = useState<Person | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -135,14 +137,14 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
             {!person.phone && <div className="text-xs text-slate-500 mt-1">Cần có SĐT để kết bạn.</div>}
           </div>
 
-          <div className="pt-2 border-t border-slate-100">
+          {showLeads ? <div className="pt-2 border-t border-slate-100">
             <div className="flex items-center justify-between mb-1"><b>Cơ hội ({leads.filter((l) => l.status === "open").length} mở)</b><button className="btn px-2 py-0.5" title="Tạo cơ hội ở giai đoạn đầu" onClick={createLead} disabled={leadBusy}><Plus size={12} /></button></div>
             {stages.length > 0 && <div className="flex flex-wrap gap-1 mb-2" title={openLead ? "Bấm để chuyển cơ hội đang mở sang giai đoạn đó" : "Chưa có cơ hội mở — bấm để tạo cơ hội ở giai đoạn đó"}>
               {stages.filter((st) => st.kind !== "lost").map((st) => { const on = openLead ? openLead.stage_id === st.id : (st.kind === "won" && lastLead?.status === "won"); return (
                 <button key={st.id} type="button" disabled={leadBusy || on} onClick={() => markStage(st)} className={cn("lchip border transition-colors", on ? "text-white border-transparent" : "bg-transparent text-slate-600 hover:text-white")} style={on ? { background: st.color } : { borderColor: st.color }} onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = st.color; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}>{st.kind === "won" ? "✓ Đã mua hàng" : st.name}</button>); })}
             </div>}{leadMsg && <div className="text-xs text-amber-700 mb-1">{leadMsg}</div>}
             {leads.map((l) => <Link key={l.id} href={`/leads?lead=${l.id}`} className="block rounded border border-slate-100 p-2 mb-1 hover:bg-slate-50"><div className="font-medium truncate">{l.title}</div><div className="text-xs text-slate-500"><span className="chip text-white" style={{ background: l.stage_color }}>{l.stage_name}</span> · {dt(l.created_at, "dd/MM")}</div></Link>)}
-          </div>
+          </div> : <div className="pt-2 border-t border-slate-100 text-xs text-slate-400" title="Bỏ tick 'Không tạo cơ hội' của nhãn trong Cài đặt → Nhãn nếu muốn theo dõi cơ hội cho nhóm này">Không theo dõi cơ hội — nhãn "{leadBlockedBy}"</div>}
 
           <div className="pt-2 border-t border-slate-100">
             <b>Đơn hàng & Báo giá ({orders.length})</b>

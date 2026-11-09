@@ -27,7 +27,11 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string; lead?: string }>({});
   // tag lead theo khách: giai đoạn cơ hội đang mở + đã mua hàng (WON hoặc có đơn) — để nhìn danh sách là biết khách ở đâu trong phễu
   const [leadTags, setLeadTags] = useState<Record<string, LeadTag>>({});
-  const custKey = useMemo(() => Array.from(new Set(convs.map((c) => c.customer_id).filter(Boolean) as string[])).sort().join(","), [convs]);
+  // nhãn "Không tạo cơ hội" (Cài đặt → Nhãn): Nhà cung cấp, Bạn bè, Gia đình, Shipper, Công nợ… → không hiện tag lead, không có mục Cơ hội
+  const skipLabels = useMemo(() => new Set(labels.filter((l) => l.skip_lead).map((l) => l.name)), [labels]);
+  const blockingLabel = useCallback((cs: Conversation[]) => cs.flatMap((c) => c.labels || []).find((l) => skipLabels.has(l)) || null, [skipLabels]);
+  const leadable = useCallback((cs: Conversation[]) => !blockingLabel(cs), [blockingLabel]);
+  const custKey = useMemo(() => Array.from(new Set(convs.filter((c) => leadable([c])).map((c) => c.customer_id).filter(Boolean) as string[])).sort().join(","), [convs, leadable]);
   const loadLeadTags = useCallback(async () => {
     const ids = custKey ? custKey.split(",") : []; if (!ids.length) { setLeadTags({}); return; }
     const sb = supabaseBrowser(); const out: Record<string, LeadTag> = {};
@@ -157,7 +161,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
                   <div className={cn("text-[12px] shrink-0 tabular-nums", g.unread ? "text-blue-600 font-medium" : "text-slate-400")}>{ago(c.last_message_at)}</div>
                 </div>
                 <div className="flex items-center gap-2 mt-0.5"><div className={cn("truncate text-[13px] leading-5 flex-1", (c.last_message_text || "").startsWith("📵") ? "text-red-600 font-medium" : g.unread ? "text-slate-700" : "text-slate-500")}>{c.kind === "comment" && <MessageSquare size={12} className="inline mr-1 -mt-0.5 text-slate-400" />}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[11px] font-semibold px-1.5 min-w-[20px] h-5 inline-flex items-center justify-center shrink-0">{g.unread}</span>}</div>
-                {(c.person_phone || c.labels?.length || c.assignee_name || (c.customer_id && leadTags[c.customer_id])) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.customer_id && leadTags[c.customer_id] && <LeadChips t={leadTags[c.customer_id]} />}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
+                {(c.person_phone || c.labels?.length || c.assignee_name || (c.customer_id && leadTags[c.customer_id])) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.customer_id && leadTags[c.customer_id] && leadable(g.convs) && <LeadChips t={leadTags[c.customer_id]} />}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
               </div>
             </a>); })}
         </div>
@@ -173,7 +177,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       {/* cột 3: panel khách */}
       {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : showPanel ? "hidden md:flex" : "hidden")}>
         <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("thread")}><ArrowLeft size={16} /></button><div className="font-semibold">Hồ sơ khách</div></div>
-        <PersonPanel key={"p" + current.id} conv={current} members={members} />
+        <PersonPanel key={"p" + current.id} conv={current} members={members} leadBlockedBy={blockingLabel(siblings)} />
       </div>}
     </div>
   );
