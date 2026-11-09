@@ -1,5 +1,5 @@
 /** Đổi tên khách trong CRM nhưng không làm mất dấu tên cũ: tên trước đó được dồn vào custom.old_names (cùng kiểu custom.phones). */
-export const PLACEHOLDER_NAME = /^(Khách mới|0\d{9})$/; // tên tạm hệ thống tự đặt — không đáng lưu vào lịch sử
+export const PLACEHOLDER_NAME = /^(Khách mới|Người dùng Facebook|Facebook User|0\d{9})$/i; // tên tạm (hệ thống / FB ẩn tên) — không đáng lưu vào lịch sử
 
 type NameRow = { name?: string | null; custom?: Record<string, unknown> | null };
 
