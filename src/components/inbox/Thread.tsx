@@ -5,6 +5,7 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { cn, dt, ago, convName } from "@/lib/utils";
+import { renameCustomer } from "@/components/CustomerName";
 import { LinkPreview, firstUrl } from "./LinkPreview";
 import { ForwardDialog } from "./ForwardDialog";
 import { BankCard } from "./BankCard";
@@ -186,10 +187,20 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     const next = convLabels.includes(name) ? convLabels.filter((l) => l !== name) : [...convLabels, name];
     setConvLabels(next); await sb.from("crm_conversations").update({ labels: next }).eq("id", conv.id);
   };
-  // đổi tên nhóm chỉ trong CRM (không đổi trên Zalo): lưu meta.alias, để trống = dùng lại tên gốc
+  // đổi tên chỉ trong CRM (không đổi trên Zalo/FB):
+  //  - khách đã có hồ sơ → đổi tên khách (crm_customers), tên cũ được lưu vào custom.old_names
+  //  - nhóm / hội thoại chưa có khách → lưu meta.alias, để trống = dùng lại tên gốc trên kênh
   const renameGroup = async () => {
+    if (conv.kind !== "group" && conv.customer_id) {
+      const { data: p } = await sb.from("crm_customers").select("id,name,custom").eq("id", conv.customer_id).single();
+      if (!p) return;
+      const v = window.prompt("Tên khách hiển thị trong CRM (tên cũ vẫn được lưu lại trong hồ sơ):", p.name || conv.display_name || "");
+      if (v === null || !v.trim()) return;
+      try { await renameCustomer(p, v); } catch (e: any) { setErr(e.message || "Không đổi tên được"); }
+      return;
+    }
     const cur = (conv as any).meta?.alias || "";
-    const v = window.prompt("Tên nhóm hiển thị trong CRM (để trống để dùng tên gốc trên Zalo):", cur || conv.display_name || "");
+    const v = window.prompt(conv.kind === "group" ? "Tên nhóm hiển thị trong CRM (để trống để dùng tên gốc trên Zalo):" : "Tên hiển thị trong CRM (để trống để dùng tên gốc trên kênh):", cur || conv.display_name || "");
     if (v === null) return;
     const alias = v.trim() && v.trim() !== conv.display_name ? v.trim() : null;
     await sb.from("crm_conversations").update({ meta: { ...((conv as any).meta || {}), alias } }).eq("id", conv.id);
@@ -254,7 +265,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     <>
       <div className="h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
         <div className="flex -space-x-1">{Array.from(new Set(all.map((c) => c.channel_type))).map((t) => <ChannelIcon key={t} type={t} size={22} />)}</div>
-        <div className="min-w-0"><div className="font-semibold truncate flex items-center gap-1">{conv.kind === "group" && <span className="inline-flex items-center gap-0.5 group-badge shrink-0"><Users size={10} />NHÓM</span>}<span className="truncate">{convName(conv)}</span>{conv.is_important && <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />}{conv.kind === "group" && <button title="Đổi tên nhóm trong CRM" onClick={renameGroup} className="p-0.5 text-slate-400 hover:text-blue-600 shrink-0"><Pencil size={12} /></button>}</div><div className="text-xs text-slate-500 truncate">{conv.kind === "group" ? `Nhóm Zalo · ${((conv as any).meta?.members?.length || 0) > 0 ? `${(conv as any).meta.members.length} thành viên` : "Tên gốc: " + (conv.display_name || "")}` : (multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name)}{conv.kind === "group" && (conv as any).meta?.alias && ` · Tên gốc: ${conv.display_name}`}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
+        <div className="min-w-0"><div className="font-semibold truncate flex items-center gap-1">{conv.kind === "group" && <span className="inline-flex items-center gap-0.5 group-badge shrink-0"><Users size={10} />NHÓM</span>}<span className="truncate">{convName(conv)}</span>{conv.is_important && <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />}<button title={conv.kind === "group" ? "Đổi tên nhóm trong CRM" : conv.customer_id ? "Đổi tên khách (tên cũ vẫn được lưu)" : "Đổi tên hiển thị trong CRM"} onClick={renameGroup} className="p-0.5 text-slate-400 hover:text-blue-600 shrink-0"><Pencil size={12} /></button></div><div className="text-xs text-slate-500 truncate">{conv.kind === "group" ? `Nhóm Zalo · ${((conv as any).meta?.members?.length || 0) > 0 ? `${(conv as any).meta.members.length} thành viên` : "Tên gốc: " + (conv.display_name || "")}` : (multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name)}{conv.kind === "group" && (conv as any).meta?.alias && ` · Tên gốc: ${conv.display_name}`}{conv.kind !== "group" && conv.display_name && convName(conv) !== conv.display_name && ` · Tên gốc: ${conv.display_name}`}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
         <div ref={headRef} className="ml-auto flex items-center gap-1 relative md:mr-10">
           <button className={cn("tbtn", showLabels && "active")} title="Gắn nhãn cho hội thoại" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); setShowMore(false); }}><Tag size={15} /><span className="hidden lg:inline">Nhãn</span></button>
           <button className={cn("tbtn", showAssign && "active")} title="Giao hội thoại cho nhân viên" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); setShowMore(false); }}><UserPlus size={15} /><span className="hidden lg:inline">Giao cho</span></button>

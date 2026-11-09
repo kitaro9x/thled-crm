@@ -8,6 +8,8 @@ import { Avatar } from "@/components/Avatar";
 import { GroupAvatar } from "@/components/GroupAvatar";
 import { extractPhone } from "@/lib/phone";
 import { money, dt, cn } from "@/lib/utils";
+import { CustomerName, OldNames } from "@/components/CustomerName";
+import { oldNames } from "@/lib/customer-name";
 
 export function PersonPanel({ conv, members }: { conv: Conversation; members: { id: string; name: string }[] }) {
   const sb = supabaseBrowser();
@@ -85,7 +87,7 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
     <div className="w-full md:w-[320px] shrink-0 md:border-l border-slate-200 bg-white overflow-y-auto flex-1 md:flex-none">
       <div className="p-4 border-b border-slate-100 flex items-center gap-3">
         {conv.kind === "group" ? <GroupAvatar src={conv.identity_avatar} name={conv.display_name} members={(conv as any).meta?.members} size={44} /> : <Avatar src={person?.avatar_url || conv.identity_avatar} name={person?.name || conv.display_name} size={44} />}
-        <div className="min-w-0"><div className="font-semibold truncate">{person?.name || conv.display_name}</div>{person && <Link href={`/cdp/${person.id}`} className="text-xs text-blue-600">Xem khách hàng</Link>}</div>
+        <div className="min-w-0">{person ? <CustomerName person={person} className="font-semibold" onSaved={load} /> : <div className="font-semibold truncate">{conv.display_name}</div>}{person && <Link href={`/cdp/${person.id}`} className="text-xs text-blue-600">Xem khách hàng</Link>}</div>
       </div>
       {!person ? (
         <div className="p-4 space-y-2">
@@ -98,6 +100,8 @@ export function PersonPanel({ conv, members }: { conv: Conversation; members: { 
         <div className="p-4 space-y-3 text-sm">
           <Row k="Phone"><div className="flex gap-1"><input className="input py-1" value={phone} onChange={(e) => setPhone(e.target.value)} onBlur={savePhone} onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />{person.phone && <a className="btn px-2" href={`tel:${person.phone}`}><Phone size={14} /></a>}</div>
             {Array.isArray(person.custom?.phones) && person.custom.phones.length > 0 && <div className="flex flex-wrap gap-1 mt-1">{(person.custom.phones as string[]).map((x: string) => <span key={x} className="chip bg-slate-100 text-slate-700 text-xs">{x} <button className="ml-1 text-blue-600" title="Dùng làm số chính" onClick={() => makePrimary(x)}>↑</button></span>)}</div>}</Row>
+          {conv.kind !== "group" && conv.display_name && conv.display_name !== person.name && <Row k="Tên trên kênh"><span className="text-slate-600" title="Tên khách tự đặt trên Zalo/Facebook (tên gốc)">{conv.display_name}</span></Row>}
+          {oldNames(person).length > 0 && <Row k="Tên cũ"><OldNames person={person} onSaved={load} /></Row>}
           <Row k="Giới tính"><select className="input py-1" value={person.gender || ""} onChange={async (e) => { await sb.from("crm_customers").update({ gender: e.target.value || null }).eq("id", person.id); load(); }}><option value="">-</option><option>Nam</option><option>Nữ</option></select></Row>
           {person.email && <Row k="Email">{person.email}</Row>}
           <Row k="Phụ trách"><select className="input py-1" value={person.assigned_to || ""} onChange={async (e) => { await sb.from("crm_customers").update({ assigned_to: e.target.value || null }).eq("id", person.id); load(); }}><option value="">-</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Row>

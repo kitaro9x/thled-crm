@@ -15,7 +15,7 @@ export interface Label { id: string; name: string; color: string; sort_order: nu
 export interface Person {
   id: string; name?: string | null; phone?: string | null; email?: string | null; gender?: string | null; zalo?: string | null;
   avatar_url?: string | null; address?: string | null; assigned_to?: string | null; labels: string[]; tags?: string[];
-  note?: string | null; custom: Record<string, unknown>; emotion?: string | null; last_message_text?: string | null; last_message_at?: string | null;
+  note?: string | null; custom: Record<string, unknown>; /* custom.phones: SĐT phụ · custom.old_names: tên cũ trước khi đổi */ emotion?: string | null; last_message_text?: string | null; last_message_at?: string | null;
   total_leads: number; won_leads: number; total_orders: number; source_origin?: string | null; created_at: string;
 }
 export interface Conversation {

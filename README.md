@@ -78,6 +78,8 @@ Tin nhắn (FB webhook / Zalo worker)
 Cron mỗi phút: outbox hẹn giờ · sequence steps · trigger theo lịch · offline nhân sự
 ```
 
+**Tên khách**: tên trên kênh (Zalo/FB) nằm ở `crm_identities.display_name`; tên trong CRM là `crm_customers.name` (sửa được ở header hội thoại, panel khách, trang khách). Khi đổi tên, tên cũ được dồn vào `crm_customers.custom.old_names` (giống `custom.phones`), hiển thị ở mục *Tên cũ* (↑ dùng lại) và tìm được ở Dữ liệu khách hàng. Worker/ingest chỉ tự đổi `name` khi đang là tên tạm (*Khách mới*/SĐT) nên tên anh tự đặt không bị ghi đè.
+
 ## 8. Cấu trúc thư mục
 
 ```
