@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Phone, Plus, UserPlus, Sparkles, Ban } from "lucide-react";
+import { Phone, Plus, UserPlus, Sparkles, Ban, Trash2, RotateCcw } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Lead, Person, Stage } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -115,6 +115,26 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
     setIdent((i) => ({ ...(i || {}), meta: { ...(i?.meta || {}), blocked: false } })); load();
   };
   const blocked = !!ident?.meta?.blocked;
+  // Xoá hội thoại khỏi CRM (ẩn toàn bộ kênh của khách) / Chặn trên Zalo — cũng có trong menu ⋯ của header
+  const hideConv = async (hide: boolean) => {
+    if (hide && !window.confirm("Xoá hội thoại này khỏi CRM?\nTin nhắn vẫn được lưu, tin mới sẽ không hiện và không báo. Xem lại ở bộ lọc “Đã xoá/chặn”.")) return;
+    const q = sb.from("crm_conversations").update({ is_hidden: hide, status: hide ? "closed" : "open" });
+    await (conv.customer_id ? q.eq("customer_id", conv.customer_id) : q.eq("id", conv.id));
+  };
+  const blockZalo = async () => {
+    if (!isZalo || !conv.external_id) return;
+    if (!window.confirm(`Chặn ${conv.display_name || "người này"} trên Zalo?\nHọ sẽ không nhắn được cho số Zalo của shop nữa. Hội thoại bị ẩn khỏi CRM, bỏ chặn được ở bộ lọc “Đã xoá/chặn”.`)) return;
+    await sb.from("crm_zalo_actions").insert({ action: "block", zalo_uid: conv.external_id, conversation_id: conv.id, identity_id: conv.identity_id });
+    await sb.from("crm_conversations").update({ is_hidden: true, status: "closed" }).eq("id", conv.id);
+    setIdent((i) => ({ ...(i || {}), meta: { ...(i?.meta || {}), blocked: true } }));
+  };
+  const dangerBox = (
+    <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1">
+      {conv.is_hidden ? <button className="btn flex-1 justify-center text-xs" onClick={() => hideConv(false)}><RotateCcw size={13} /> Khôi phục hội thoại</button>
+        : <button className="btn flex-1 justify-center text-xs text-red-600" title="Ẩn khỏi CRM; tin nhắn vẫn lưu, xem lại ở bộ lọc Đã xoá/chặn" onClick={() => hideConv(true)}><Trash2 size={13} /> Xoá hội thoại</button>}
+      {isZalo && !blocked && <button className="btn flex-1 justify-center text-xs text-red-600" title="Chặn thật trên Zalo của shop — chỉ dùng cho số spam" onClick={blockZalo}><Ban size={13} /> Chặn trên Zalo</button>}
+    </div>
+  );
   const isFriend = isZalo ? ident?.meta?.is_friend : friendTask?.status === "accepted";
   const pending = !!friendTask && ["todo", "pending", "sent"].includes(friendTask.status);
   const friendBox = (isZalo || person?.phone) && (
@@ -158,6 +178,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           <input className="input" placeholder="Số điện thoại" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <button className="btn btn-primary w-full justify-center" onClick={createPerson} disabled={busy}><Plus size={14} /> Tạo khách hàng</button>
           {friendBox}
+          {dangerBox}
         </div>
       ) : (
         <div className="p-4 space-y-3 text-sm">
@@ -190,6 +211,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
 
           <button className="btn w-full justify-center" onClick={summarize} disabled={aiBusy}><Sparkles size={14} /> {aiBusy ? "AI đang đọc hội thoại…" : ai?.summary ? "AI tóm tắt lại" : "AI tóm tắt hội thoại"}</button>
           {ai?.error && <div className="text-xs text-red-600 mt-1">{ai.error}</div>}
+          {dangerBox}
           {ai?.summary && <div className="mt-2 rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-slate-700 whitespace-pre-wrap">
             <div className="flex items-center gap-1 font-semibold text-violet-700 mb-1"><Sparkles size={12} /> Tóm tắt AI{ai.stage && <span className="chip bg-violet-100 text-violet-700 ml-auto">{ai.stage}</span>}</div>
             {ai.summary}
