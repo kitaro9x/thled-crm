@@ -8,12 +8,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ q
   const sb = await supabaseServer();
   const from = (Number(page) - 1) * 50;
   let query = sb.from("crm_customers").select("*, crm_members!crm_customers_assigned_to_fkey(name)", { count: "exact" }).order("created_at", { ascending: false }).range(from, from + 49);
-  if (q) query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%`);
+  if (q) query = query.or(`name.ilike.%${q}%,phone.ilike.%${q}%,email.ilike.%${q}%,zalo.ilike.%${q}%,custom->>old_names.ilike.%${q}%`); // tìm cả tên Zalo và tên cũ đã đổi
   const { data, count } = await query;
   return (
     <div className="h-full flex flex-col">
       <div className="px-4 py-2 bg-white border-b border-slate-200 flex items-center gap-2"><b>Dữ liệu khách hàng</b><span className="text-slate-400 text-sm">{count} khách</span>
-        <form className="ml-4"><input name="q" defaultValue={q} className="input w-72" placeholder="Tìm tên, email, SĐT" /></form>
+        <form className="ml-4"><input name="q" defaultValue={q} className="input w-72" placeholder="Tìm tên (cả tên cũ), email, SĐT" /></form>
         <div className="ml-auto flex gap-2"><Link href="/cdp/import" className="btn">Import</Link><a href="/api/export/customers" className="btn">Export CSV</a><Link href="/cdp/new" className="btn btn-primary">+ Customer</Link></div>
       </div>
       <div className="flex-1 overflow-auto p-4">

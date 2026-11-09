@@ -4,6 +4,8 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { Avatar } from "@/components/Avatar";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { dt, money } from "@/lib/utils";
+import { CustomerName, OldNames } from "@/components/CustomerName";
+import { oldNames } from "@/lib/customer-name";
 export const dynamic = "force-dynamic";
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params; const sb = await supabaseServer();
@@ -15,8 +17,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <div className="h-full overflow-auto p-4 grid grid-cols-[320px_1fr] gap-4">
       <div className="card p-4 space-y-2 text-sm h-fit">
-        <div className="flex items-center gap-3"><Avatar src={p.avatar_url} name={p.name} size={56} /><div><div className="text-lg font-semibold">{p.name}</div><div className="text-slate-500">{p.phone}</div></div></div>
+        <div className="flex items-center gap-3"><Avatar src={p.avatar_url} name={p.name} size={56} /><div className="min-w-0"><CustomerName person={p} className="text-lg font-semibold" /><div className="text-slate-500">{p.phone}</div></div></div>
         {[["Email", p.email], ["Giới tính", p.gender], ["Zalo", p.zalo], ["Địa chỉ", p.address], ["SP quan tâm", p.custom?.sp_quan_tam], ["Cảm xúc", p.emotion], ["Nguồn", p.source_origin], ["Tạo", dt(p.created_at, "dd/MM/yyyy")]].map(([k, v]) => <div key={k as string} className="grid grid-cols-[100px_1fr]"><span className="text-slate-500">{k as string}</span><span>{(v as string) || "-"}</span></div>)}
+        <div className="grid grid-cols-[100px_1fr]"><span className="text-slate-500" title="Những tên đã dùng trước khi đổi — ↑ để dùng lại">Tên cũ</span><OldNames person={p} emptyText={oldNames(p).length ? "" : "-"} /></div>
         <div><b>Kênh liên lạc</b><div className="flex gap-2 mt-1">{(convs || []).map((c) => <Link key={c.id} href={`/inbox?c=${c.id}`} className="btn px-2"><ChannelIcon type={c.channel_type} /> {c.display_name}</Link>)}</div></div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-center pt-2"><Stat n={p.total_leads} l="Cơ hội" /><Stat n={p.won_leads} l="Won" /><Stat n={p.total_orders} l="Đơn" /></div>
       </div>
