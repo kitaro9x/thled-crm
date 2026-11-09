@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
@@ -24,7 +24,41 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [hi, setHi] = useState(0); // dòng đang chọn bằng phím khi tìm kiếm
   const [qf, setQf] = useState<QuickFilter>("open");
   const [showFilter, setShowFilter] = useState(false);
-  const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string }>({});
+  const [f, setF] = useState<{ channel?: string; label?: string; assignee?: string; hasPhone?: string; lead?: string }>({});
+  // tag lead theo khách: giai đoạn cơ hội đang mở + đã mua hàng (WON hoặc có đơn) — để nhìn danh sách là biết khách ở đâu trong phễu
+  const [leadTags, setLeadTags] = useState<Record<string, LeadTag>>({});
+  const custKey = useMemo(() => Array.from(new Set(convs.map((c) => c.customer_id).filter(Boolean) as string[])).sort().join(","), [convs]);
+  const loadLeadTags = useCallback(async () => {
+    const ids = custKey ? custKey.split(",") : []; if (!ids.length) { setLeadTags({}); return; }
+    const sb = supabaseBrowser(); const out: Record<string, LeadTag> = {};
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const [{ data: ls }, { data: cs }] = await Promise.all([
+        sb.from("crm_v_leads").select("person_id,status,stage_name,stage_color,stage_kind,updated_at").in("person_id", chunk).order("updated_at", { ascending: false }),
+        sb.from("crm_customers").select("id,total_orders").in("id", chunk),
+      ]);
+      for (const c of cs || []) out[c.id] = { won: false, lost: false, orders: c.total_orders || 0 };
+      for (const l of ls || []) {
+        const t = (out[l.person_id!] ||= { won: false, lost: false, orders: 0 });
+        if (l.status === "won") t.won = true; else if (l.status === "lost") t.lost = true;
+        else if (!t.open) t.open = { name: l.stage_name || "", color: l.stage_color || "#64748b" }; // cơ hội mở cập nhật gần nhất
+      }
+    }
+    setLeadTags(out);
+  }, [custKey]);
+  useEffect(() => { loadLeadTags(); }, [loadLeadTags]);
+  useEffect(() => { // cơ hội / đơn hàng đổi → tải lại tag
+    const sb = supabaseBrowser();
+    const ch = sb.channel("inbox-leads").on("postgres_changes", { event: "*", schema: "public", table: "crm_leads" }, () => loadLeadTags()).on("postgres_changes", { event: "*", schema: "public", table: "crm_orders" }, () => loadLeadTags()).subscribe();
+    return () => { sb.removeChannel(ch); };
+  }, [loadLeadTags]);
+  // lọc theo lead: bought = WON/có đơn · open = đang có cơ hội mở (kể cả khách cũ mua lại) · lost = chỉ còn cơ hội thất bại · none = chưa có gì
+  const matchLead = (c: Conversation, want: string) => {
+    const t = c.customer_id ? leadTags[c.customer_id] : undefined; const bought = !!t && (t.won || t.orders > 0);
+    if (want === "bought") return bought; if (want === "open") return !!t?.open;
+    if (want === "lost") return !!t && t.lost && !t.open && !bought;
+    return !t || (!t.open && !bought && !t.lost);
+  };
   const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
   const [mobileView, setMobileView] = useState<"list" | "thread" | "panel">("list"); // điện thoại: từng màn
   const [showPanel, setShowPanel] = useState(true); // máy tính: ẩn/hiện cột hồ sơ khách
@@ -63,9 +97,10 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (f.assignee && c.assigned_to !== f.assignee) return false;
     if (f.hasPhone === "yes" && !c.person_phone) return false;
     if (f.hasPhone === "no" && c.person_phone) return false;
+    if (f.lead && !matchLead(c, f.lead)) return false;
     if (q) { const s = q.toLowerCase(); return convName(c).toLowerCase().includes(s) || (c.person_phone || "").includes(s) || (c.last_message_text || "").toLowerCase().includes(s); }
     return true;
-  }), [convs, q, qf, f]);
+  }), [convs, q, qf, f, leadTags]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
 
   // gộp: 1 khách (customer_id) = 1 dòng; hội thoại chưa có khách đứng riêng
   const groups = useMemo(() => {
@@ -106,6 +141,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
               <select className="input" value={f.label || ""} onChange={(e) => setF({ ...f, label: e.target.value || undefined })}><option value="">Thẻ</option>{labels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}</select>
               <select className="input" value={f.assignee || ""} onChange={(e) => setF({ ...f, assignee: e.target.value || undefined })}><option value="">Nhân viên</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
               <select className="input" value={f.hasPhone || ""} onChange={(e) => setF({ ...f, hasPhone: e.target.value || undefined })}><option value="">Trạng thái SĐT</option><option value="yes">Đã có SĐT</option><option value="no">Chưa có SĐT</option></select>
+              <select className="input col-span-2" value={f.lead || ""} onChange={(e) => setF({ ...f, lead: e.target.value || undefined })}><option value="">Trạng thái lead</option><option value="bought">Đã mua hàng</option><option value="open">Đang có cơ hội mở</option><option value="lost">Chỉ có cơ hội LOST</option><option value="none">Chưa có cơ hội</option></select>
             </div>
           )}
         </div>
@@ -121,7 +157,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
                   <div className={cn("text-[12px] shrink-0 tabular-nums", g.unread ? "text-blue-600 font-medium" : "text-slate-400")}>{ago(c.last_message_at)}</div>
                 </div>
                 <div className="flex items-center gap-2 mt-0.5"><div className={cn("truncate text-[13px] leading-5 flex-1", (c.last_message_text || "").startsWith("📵") ? "text-red-600 font-medium" : g.unread ? "text-slate-700" : "text-slate-500")}>{c.kind === "comment" && <MessageSquare size={12} className="inline mr-1 -mt-0.5 text-slate-400" />}{c.last_message_text}</div>{g.unread > 0 && <span className="bg-red-500 text-white rounded-full text-[11px] font-semibold px-1.5 min-w-[20px] h-5 inline-flex items-center justify-center shrink-0">{g.unread}</span>}</div>
-                {(c.person_phone || c.labels?.length || c.assignee_name) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
+                {(c.person_phone || c.labels?.length || c.assignee_name || (c.customer_id && leadTags[c.customer_id])) && <div className="flex gap-1 mt-1 flex-wrap items-center">{c.person_phone && <span className="lchip lchip-green"><Phone size={10} className="mr-1" />{c.person_phone}</span>}{c.customer_id && leadTags[c.customer_id] && <LeadChips t={leadTags[c.customer_id]} />}{c.labels?.slice(0, 2).map((l) => <span key={l} className={cn("lchip", labelTone(l))}>{l}</span>)}{c.assignee_name && <span className="lchip lchip-blue">{c.assignee_name}</span>}</div>}
               </div>
             </a>); })}
         </div>
@@ -141,4 +177,15 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       </div>}
     </div>
   );
+}
+
+type LeadTag = { open?: { name: string; color: string }; won: boolean; lost: boolean; orders: number };
+/** Chip lead trên dòng hội thoại: "Đã mua hàng" (WON hoặc có đơn) · giai đoạn cơ hội đang mở (màu theo giai đoạn) · LOST khi chỉ còn cơ hội thất bại */
+function LeadChips({ t }: { t: LeadTag }) {
+  const bought = t.won || t.orders > 0;
+  return (<>
+    {bought && <span className="lchip lchip-green" title={t.orders > 0 ? `Đã có ${t.orders} đơn hàng` : "Đã có cơ hội WON"}>✓ Đã mua hàng</span>}
+    {t.open && <span className="lchip" style={{ background: t.open.color, color: "#fff" }} title="Cơ hội đang mở">{t.open.name}</span>}
+    {!bought && !t.open && t.lost && <span className="lchip lchip-red" title="Cơ hội đã thất bại">LOST</span>}
+  </>);
 }
