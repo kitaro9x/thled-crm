@@ -6,6 +6,7 @@ import { Presence } from "@/components/Presence";
 import { NavLink } from "@/components/NavLink";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PushToggle } from "@/components/PushToggle";
+import { SwBridge } from "@/components/SwBridge";
 
 const nav = [
   { href: "/inbox", label: "Hội thoại", icon: MessageSquare },
@@ -58,6 +59,7 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
         <ThemeToggle compact />
       </nav>
       <Presence />
+      <SwBridge />
     </div>
   );
 }

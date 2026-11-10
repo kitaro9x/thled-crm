@@ -85,6 +85,11 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const toggleAuto = async () => { const n = !autoCreate; setAutoCreate(n); await supabaseBrowser().from("crm_lead_sources").update({ is_active: n }).eq("type", "conversation"); };
   // mở từ thông báo đẩy: /inbox?c=<conversation id>
   useEffect(() => { try { const c = new URLSearchParams(window.location.search).get("c"); if (c) { setSel(c); setMobileView("thread"); } } catch {} }, []);
+  // bấm thông báo đẩy khi đang ở Hội thoại → mở thẳng hội thoại đó (SwBridge phát sự kiện)
+  useEffect(() => {
+    const h = (e: Event) => { const c = (e as CustomEvent<string>).detail; if (c) { setSel(c); setMobileView("thread"); } };
+    window.addEventListener("crm:open-conv", h); return () => window.removeEventListener("crm:open-conv", h);
+  }, []);
   useEffect(() => { try { const v = localStorage.getItem("inbox_group"); if (v !== null) setGroup(v === "1"); } catch {} }, []);
   const toggleGroup = () => { setGroup((g) => { try { localStorage.setItem("inbox_group", g ? "0" : "1"); } catch {} return !g; }); };
 

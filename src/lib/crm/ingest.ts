@@ -4,6 +4,10 @@ import type { Attachment, ChannelType, LeadSource } from "@/lib/types";
 import { runAutomation } from "./automation";
 import { pushNewMessage } from "@/lib/crm/push";
 import { pickAssignee } from "./distribution";
+import { after } from "next/server";
+
+/** chạy việc phụ sau khi trả response; ngoài phạm vi request (script…) thì chạy luôn kiểu fire-and-forget */
+function runAfter(fn: () => Promise<unknown>) { try { after(fn); } catch { void fn(); } }
 
 export interface InboundMessage {
   channelType: ChannelType;
@@ -85,7 +89,8 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   if (direction === "in" && !conv.is_hidden) { // hội thoại đã xoá/chặn trong CRM → không làm phiền
     const who = (kind === "group" ? (m.messageSenderName ? m.messageSenderName + " · " : "") : "") + (identity.display_name || m.senderName || "Khách");
     const preview = m.text || (m.attachments?.length ? `[${m.attachments[0].type === "image" ? "Ảnh" : m.attachments[0].type === "video" ? "Video" : "Tệp"}]` : "[Tin nhắn]");
-    void pushNewMessage(db, { conversationId: conv.id, title: `${who} (${channel.type === "fb_page" ? "Messenger" : kind === "group" ? "Nhóm Zalo" : "Zalo"})`, body: preview, icon: identity.avatar_url, assignedTo: conv.assigned_to, labels: conv.labels || [] });
+    // after(): Vercel giữ function sống tới khi gửi xong push (void promise có thể bị đóng băng ngay khi trả response → mất/trễ thông báo)
+    runAfter(() => pushNewMessage(db, { conversationId: conv.id, title: `${who} (${channel.type === "fb_page" ? "Messenger" : kind === "group" ? "Nhóm Zalo" : "Zalo"})`, body: preview, icon: identity.avatar_url, assignedTo: conv.assigned_to, labels: conv.labels || [] }));
   }
 
   if (direction !== "in" || kind === "group") return { conversationId: conv.id, messageId: msg.id }; // nhóm: không bắt SĐT / tạo khách / phân phối

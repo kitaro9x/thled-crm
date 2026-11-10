@@ -2,6 +2,7 @@ import webpush from "web-push";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 let configured = false;
+export const PUSH_OPTS = { TTL: 4 * 3600, urgency: "high" as const };
 async function setup(db: ReturnType<typeof supabaseAdmin>) {
   if (configured) return true;
   const { data } = await db.from("crm_secrets").select("value").eq("key", "vapid").maybeSingle();
@@ -26,7 +27,8 @@ export async function pushNewMessage(db: ReturnType<typeof supabaseAdmin>, p: { 
     if (p.labels?.length) { const { data: l } = await db.from("crm_labels").select("name").in("name", p.labels).eq("admin_only", true).limit(1); adminOnly = !!l?.length; }
     const payload = JSON.stringify({ title: p.title, body: p.body.slice(0, 140), icon: p.icon || "/icons/icon-192.png", url: `/inbox?c=${p.conversationId}`, tag: `conv-${p.conversationId}` });
     await Promise.all((subs || []).filter((s: any) => s.crm_members?.is_active && (!adminOnly || s.crm_members?.role === "admin")).map(async (s: any) => {
-      try { await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload, { TTL: 600 }); }
+      // urgency high: Android không dồn/trễ thông báo khi máy ngủ (Doze); TTL 4h: máy mất sóng một lúc vẫn nhận
+      try { await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload, PUSH_OPTS); }
       catch (e: any) { if (e?.statusCode === 404 || e?.statusCode === 410) await db.from("crm_push_subscriptions").delete().eq("id", s.id); }
     }));
   } catch (e) { console.error("push err", e); }
