@@ -406,7 +406,7 @@ async function main() {
           const since = new Date(Date.now() - 2 * 60000).toISOString();
           const { data: recent } = await sb.from("crm_messages").select("id,status,text,type,external_msg_id").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).order("created_at", { ascending: false }).limit(10);
           const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
-          const dup = (recent || []).find((r) => !r.external_msg_id && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
+          const dup = (recent || []).find((r) => (!r.external_msg_id || String(r.external_msg_id).startsWith("worker-")) && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
           if (dup) { await sb.from("crm_messages").update({ status: "sent", external_msg_id: String(d.msgId) }).eq("id", dup.id); return; }
         }
       }
@@ -514,8 +514,9 @@ async function main() {
           await setIdentityMeta(t.zalo_uid, { is_friend: true });
           console.log("Đã kết bạn:", t.phone, t.zalo_name);
           if (t.after_accept_message) {
-            await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User);
+            // ghi vào CRM TRƯỚC rồi mới gửi: listener (selfListen) nhận lại tin này sẽ khớp bản ghi worker-… và chỉ cập nhật mã tin, không ghi đôi
             await recordOutgoing(own, t.zalo_uid, t.zalo_name || p.displayName || p.zaloName, t.after_accept_message);
+            await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User);
             await sleep(rnd(2000, 4000));
           }
         }
