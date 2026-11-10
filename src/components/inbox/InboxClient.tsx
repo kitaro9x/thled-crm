@@ -44,14 +44,14 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     for (let i = 0; i < ids.length; i += 100) {
       const chunk = ids.slice(i, i + 100);
       const [{ data: ls }, { data: cs }] = await Promise.all([
-        sb.from("crm_v_leads").select("person_id,status,stage_name,stage_color,stage_kind,updated_at").in("person_id", chunk).order("updated_at", { ascending: false }),
+        sb.from("crm_v_leads").select("person_id,status,stage_id,stage_name,stage_color,stage_kind,updated_at").in("person_id", chunk).order("updated_at", { ascending: false }),
         sb.from("crm_customers").select("id,total_orders").in("id", chunk),
       ]);
       for (const c of cs || []) out[c.id] = { won: false, lost: false, orders: c.total_orders || 0 };
       for (const l of ls || []) {
         const t = (out[l.person_id!] ||= { won: false, lost: false, orders: 0 });
         if (l.status === "won") t.won = true; else if (l.status === "lost") t.lost = true;
-        else if (!t.open) t.open = { name: l.stage_name || "", color: l.stage_color || "#64748b" }; // cơ hội mở cập nhật gần nhất
+        else if (!t.open) t.open = { id: l.stage_id, name: l.stage_name || "", color: l.stage_color || "#64748b" }; // cơ hội mở cập nhật gần nhất
       }
     }
     setLeadTags(out);
@@ -71,6 +71,12 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (want === "lost") return !!t && t.lost && !t.open && !bought;
     return !t || (!t.open && !bought && !t.lost);
   };
+  // hàng chip lọc theo giai đoạn: các giai đoạn mở của phễu mặc định (trừ Huỷ) + "Đã mua hàng"
+  const [stages, setStages] = useState<{ id: string; name: string; color: string }[]>([]);
+  useEffect(() => { (async () => { const sb = supabaseBrowser(); const { data: pipe } = await sb.from("crm_pipelines").select("id").eq("is_default", true).single(); if (!pipe) return; const { data } = await sb.from("crm_stages").select("id,name,color,kind").eq("pipeline_id", pipe.id).eq("kind", "open").order("sort_order"); setStages(((data as any[]) || []).filter((x) => !/^hu[ỷy]/i.test(x.name))); })(); }, []);
+  const [stageF, setStageF] = useState<string | null>(null); // id giai đoạn hoặc "bought"
+  const matchStage = (c: Conversation, want: string) => { const t = c.customer_id ? leadTags[c.customer_id] : undefined; return want === "bought" ? !!t && (t.won || t.orders > 0) : t?.open?.id === want; };
+  const stageLabel = (n: string) => (/^khởi tạo lead$/i.test(n) ? "Lead" : n);
   const [group, setGroup] = useState(true); // gộp FB + Zalo của cùng khách thành 1 dòng
   // chip "Khách hàng": chỉ hiện hội thoại là khách (chưa gắn nhãn hoặc nhãn khách) — loại Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick "Không tạo cơ hội")
   const [custOnly, setCustOnly] = useState(false);
@@ -104,7 +110,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
 
   useEffect(() => { if (qf !== "hidden") return; supabaseBrowser().from("crm_v_conversations").select("*").eq("is_hidden", true).order("last_message_at", { ascending: false, nullsFirst: false }).limit(200).then(({ data }) => setHiddenConvs((data as Conversation[]) || [])); }, [qf]);
   const pool = qf === "hidden" ? hiddenConvs || [] : convs;
-  const list = useMemo(() => pool.filter((c) => {
+  const base = useMemo(() => pool.filter((c) => {
     if (qf === "hidden") return !!c.is_hidden && (!q || convName(c).toLowerCase().includes(q.toLowerCase()) || (c.person_phone || "").includes(q));
     if (c.is_hidden) return false; // đã xoá/chặn → chỉ hiện ở bộ lọc riêng
     if (qf === "open" && c.status !== "open") return false;
@@ -123,6 +129,10 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
     if (q) { const s = q.toLowerCase(); return convName(c).toLowerCase().includes(s) || (c.person_phone || "").includes(s) || (c.last_message_text || "").toLowerCase().includes(s); }
     return true;
   }), [pool, q, qf, f, leadTags, custOnly, isCustomer]); // eslint-disable-line react-hooks/exhaustive-deps -- matchLead đọc leadTags
+  const list = useMemo(() => (stageF ? base.filter((c) => matchStage(c, stageF)) : base), [base, stageF, leadTags]); // eslint-disable-line react-hooks/exhaustive-deps -- matchStage đọc leadTags
+  // số khách (không trùng) ở mỗi giai đoạn trong danh sách đang lọc
+  const stageCount = useMemo(() => { const out: Record<string, number> = {}; const keys = ["bought", ...stages.map((x) => x.id)];
+    for (const k of keys) out[k] = new Set(base.filter((c) => matchStage(c, k)).map((c) => c.customer_id || c.id)).size; return out; }, [base, stages, leadTags]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // gộp: 1 khách (customer_id) = 1 dòng; hội thoại chưa có khách đứng riêng
   const groups = useMemo(() => {
@@ -157,6 +167,10 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
           <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}<button onClick={toggleCustOnly} title="Chỉ hiện khách hàng: hội thoại chưa gắn nhãn hoặc nhãn khách. Ẩn Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick 'Không tạo cơ hội' trong Cài đặt → Nhãn). Kết hợp được với các chip khác." className={cn("fchip", custOnly && "on", custOnly && "ring-1 ring-emerald-400")}>{custOnly ? "✓ " : ""}Khách hàng</button></div>
+          {stages.length > 0 && <div className="flex gap-1.5 flex-wrap" title="Lọc theo giai đoạn cơ hội của khách — bấm lần nữa để bỏ lọc">
+            {stages.map((st) => <button key={st.id} onClick={() => setStageF((v) => (v === st.id ? null : st.id))} className={cn("fchip", stageF === st.id && "on")} style={stageF === st.id ? { background: st.color, borderColor: st.color, color: "#fff" } : { borderColor: st.color }}>{stageLabel(st.name)} <span className="opacity-70 tabular-nums">{stageCount[st.id] ?? 0}</span></button>)}
+            <button onClick={() => setStageF((v) => (v === "bought" ? null : "bought"))} className={cn("fchip", stageF === "bought" && "on")} style={stageF === "bought" ? { background: "#16a34a", borderColor: "#16a34a", color: "#fff" } : { borderColor: "#16a34a" }}>✓ Đã mua hàng <span className="opacity-70 tabular-nums">{stageCount.bought ?? 0}</span></button>
+          </div>}
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
               <select className="input" value={f.channel || ""} onChange={(e) => setF({ ...f, channel: e.target.value || undefined })}><option value="">Nguồn hội thoại</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
@@ -202,7 +216,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   );
 }
 
-type LeadTag = { open?: { name: string; color: string }; won: boolean; lost: boolean; orders: number };
+type LeadTag = { open?: { id?: string; name: string; color: string }; won: boolean; lost: boolean; orders: number };
 /** Chip lead trên dòng hội thoại: "Đã mua hàng" (WON hoặc có đơn) · giai đoạn cơ hội đang mở (màu theo giai đoạn) · LOST khi chỉ còn cơ hội thất bại */
 function LeadChips({ t }: { t: LeadTag }) {
   const bought = t.won || t.orders > 0;
