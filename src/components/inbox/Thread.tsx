@@ -346,7 +346,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <div key={m.id} id={"msg-" + m.id} onTouchStart={() => lpStart(m.id)} onTouchEnd={lpEnd} onTouchMove={lpEnd} onContextMenu={(e) => { if (isMobile) e.preventDefault(); }} className={cn("flex group items-center gap-1.5 rounded-xl transition py-0.5 select-none md:select-text", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && renderActions(m)}
-            <div className={cn("max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (m.status === "failed" ? "bg-red-600 text-white rounded-br-sm" : byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
+            <div className={cn("relative max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", m.reactions && Object.keys(m.reactions).length > 0 && "mb-3", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (m.status === "failed" ? "bg-red-600 text-white rounded-br-sm" : byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <img key={i} src={a.url} alt="" className="rounded-lg max-h-60 mb-1 cursor-zoom-in hover:opacity-95" onLoad={() => { if (atBottom) jumpBottom(); }} onClick={() => { const k = allImages.findIndex((x) => x.url === a.url); setLb(k >= 0 ? k : 0); }} /> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[12px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
               {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const canJump = !!(q.msg_id || q.cli_id); return (<>
@@ -360,6 +360,15 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[11px] mt-1 flex items-center gap-1 tabular-nums", m.direction === "out" ? "text-blue-100/90" : "text-slate-500")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && <span className="text-red-100 font-semibold">· chưa gửi được</span>}{m.direction === "out" && m.status === "failed" && <button onClick={() => retry(m)} disabled={sending} className="ml-1 rounded bg-white/90 text-red-700 px-1.5 py-0.5 font-semibold hover:bg-white disabled:opacity-60">Gửi lại</button>}</div>
               {m.status === "failed" && (m as any).raw?.error && <div className="text-[11px] mt-0.5 text-red-100/90 break-words">{String((m as any).raw.error)}</div>}
+              {m.reactions && Object.keys(m.reactions).length > 0 && (() => {
+                // gom theo emoji như Zalo: ❤️ 2 · 👍 1 — rê chuột để xem ai thả
+                const rs = Object.values(m.reactions!); const by = new Map<string, string[]>();
+                for (const r of rs) by.set(r.icon, [...(by.get(r.icon) || []), r.self ? "Mình" : (r.name || convName(byId[m.conversation_id] || conv))]);
+                const tip = Array.from(by.entries()).map(([ic, ns]) => `${ic} ${ns.join(", ")}`).join("\n");
+                return <div title={tip} className={cn("absolute -bottom-3 flex items-center gap-0.5 rounded-full bg-white border border-slate-200 shadow-sm px-1.5 py-[1px] text-[13px] leading-none text-slate-600 select-none", m.direction === "out" ? "left-2" : "right-2")}>
+                  {Array.from(by.keys()).slice(0, 4).map((ic) => <span key={ic}>{ic}</span>)}{rs.length > 1 && <span className="text-[11px] font-medium tabular-nums ml-0.5">{rs.length}</span>}
+                </div>;
+              })()}
             </div>
             {m.direction !== "out" && renderActions(m)}
           </div>

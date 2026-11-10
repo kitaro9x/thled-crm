@@ -39,6 +39,12 @@ export async function POST(req: NextRequest) {
       for (const m of events) {
         const isEcho = !!m.message?.is_echo;
         const senderId = isEcho ? m.recipient.id : m.sender.id;
+        // biểu tượng cảm xúc trên tin (cần bật trường webhook "message_reactions" cho Page)
+        if (m.reaction?.mid) {
+          const fromPage = String(m.sender?.id) === String(pageId);
+          await db.rpc("crm_set_reaction", { p_msg_ids: [m.reaction.mid], p_uid: String(m.sender?.id || ""), p_icon: m.reaction.action === "unreact" ? "" : (m.reaction.emoji || "👍"), p_name: null, p_self: fromPage });
+          continue;
+        }
         if (!m.message) continue; // bỏ qua delivery/read
         // echo của tin CRM tự gửi (đã lưu external_msg_id) → bỏ qua; echo từ app FB/Business Suite/auto-reply → ghi nhận là tin đi
         if (isEcho && m.message.mid) {

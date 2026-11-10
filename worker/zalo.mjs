@@ -424,6 +424,18 @@ async function main() {
     } catch (e) { console.error("msg err", e.message); }
   });
   // websocket đóng hẳn (zca-js hết lượt thử lại) → thoát để pm2 khởi động lại; lỗi phiên → cần QR
+  // Biểu tượng cảm xúc (tim / like / haha…) khách hoặc mình thả lên tin → crm_messages.reactions
+  const Z_REACT = { "/-heart": "❤️", "/-strong": "👍", ":>": "😆", ":o": "😮", ":-((": "😢", ":-h": "😡", ":-*": "😘", ":')": "😂", "/-shit": "💩", "/-rose": "🌹", "/-break": "💔", "/-weak": "👎", ";xx": "😍", ";-/": "😕", ";-)": "😉", "/-fade": "🥀", "/-li": "☀️", "/-bd": "🎂", "/-bome": "💣", "/-ok": "👌", "/-v": "✌️", "/-thanks": "🙏", "/-punch": "👊", "/-share": "🔗", "_()_": "🙏", "/-no": "🙅", "/-bad": "👎", "/-loveu": "🥰", "--b": "😓", ":((": "😭", "x-)": "😎", "8-)": "🤓", ";-d": "😁", "b-)": "😎", ":--|": "😐", "p-(": "☹️", ":-bye": "👋", "|-)": "😴", ":wipe": "😅", ":-dig": "🤔", "&-(": "😧", ":handclap": "👏", ">-|": "😠", ";-x": "🤐", ":-o": "😲", ";-s": "😳", ";-a": "😨", ":-<": "😞", ":))": "🤣", "$-)": "🤑", "/-beer": "🍺" };
+  api.listener.on("reaction", async (r) => {
+    try {
+      const d = r.data; const c = d.content || {};
+      const ids = (c.rMsg || []).map((x) => x.gMsgID).filter(Boolean).map(String); // gMsgID = msgId đã lưu ở external_msg_id
+      if (!ids.length) return;
+      const icon = c.rIcon ? (Z_REACT[c.rIcon] || c.rIcon) : ""; // rIcon rỗng = gỡ reaction
+      const uid = String(d.uidFrom === "0" || r.isSelf ? own : d.uidFrom);
+      await sb.rpc("crm_set_reaction", { p_msg_ids: ids, p_uid: uid, p_icon: icon, p_name: r.isSelf ? null : (d.dName || null), p_self: !!r.isSelf });
+    } catch (e) { console.error("reaction", e.message); }
+  });
   api.listener.on("closed", async (code, reason) => { console.error("listener closed", code, reason); await setWorker({ last_error: `Listener đóng (${code} ${reason || ""}) — đang khởi động lại` }); await checkSession(api); process.exit(1); });
   api.listener.on("disconnected", (code, reason) => console.log("listener disconnected", code, reason || ""));
   api.listener.on("error", (e) => console.error("listener error", e?.message || e));

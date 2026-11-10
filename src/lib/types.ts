@@ -30,6 +30,7 @@ export interface Conversation {
 export interface Message {
   id: string; conversation_id: string; direction: "in" | "out"; type: string; text?: string | null; attachments: Attachment[];
   external_msg_id?: string | null; sender_member_id?: string | null; status: string; sent_at: string; created_at: string;
+  reactions?: Record<string, { icon: string; name?: string | null; self?: boolean; at?: string }> | null;
 }
 export interface Attachment { type: "image" | "file" | "video" | "audio" | "sticker"; url: string; name?: string; }
 export interface Pipeline { id: string; name: string; sort_order: number; is_default: boolean; }
