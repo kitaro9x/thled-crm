@@ -42,6 +42,7 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 
 - Chỉ dùng **số phụ** (Lyly), không dùng Zalo chính. Không bấm "đăng xuất thiết bị khác" trên điện thoại.
 - Kết bạn tự động: `friend_daily_limit` mặc định 15/ngày, delay 20–60s. Tuần đầu nên 5–10.
+- Lời chào khi khách đồng ý kết bạn: sửa ở *Cài đặt → Kênh* (`crm_settings.zalo_welcome`; chưa lưu lần nào thì worker dùng mẫu mặc định trong `worker/zalo.mjs`). Luật tự động có điền "Tin nhắn gửi sau lời mời kết bạn" thì ưu tiên tin của luật. Mặc định bỏ qua nếu khách đã từng nhắn với Zalo này. Worker kiểm tra lời mời đã gửi trong 14 ngày, mỗi người ~3 phút/lần, ≤5 người/vòng → lời chào có thể trễ vài phút sau khi khách bấm đồng ý.
 - Nếu Zalo báo hạn chế → tắt kết bạn vài ngày (đặt limit = 0), không cố.
 - Đã chuyển sang VPS Việt Nam (Vietnix) 09/11/2026 để giảm việc Zalo thu hồi phiên; vẫn có thể bị hỏi "Đó là tôi" trên điện thoại khi đổi IP.
 - Phương án dự phòng: chạy worker trên máy tính cửa hàng — code không đổi.
