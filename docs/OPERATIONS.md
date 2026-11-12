@@ -76,3 +76,13 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 ## 8. Việc cần làm sau khi chuyển VPS (09/11/2026)
 - Huỷ VPS Vultr `207.148.73.195` sau 2–3 ngày nếu Vietnix ổn (đang `pm2 stop`).
 - **Đổi khoá** `SUPABASE_SERVICE_ROLE_KEY` và `CRON_SECRET`: đã lộ qua ảnh chụp màn hình khi cài. Thứ tự: Supabase → tạo key mới → cập nhật Vercel (CRM + web thled.vn nếu dùng chung) → `/opt/thled-crm/.env.local` trên Vietnix → `pm2 restart zalo` → thu hồi key cũ. Làm lúc vắng khách.
+
+## 9. Công việc từ hội thoại & Kho lưu trữ — thêm 12/11/2026
+**Tạo công việc ngay trong chat** (lưu vào bảng `crm_activities` = mục **Hành động**, không có bảng riêng):
+- Rê chuột lên tin (điện thoại: nhấn giữ) → icon 📋+ *Tạo công việc từ tin này*. Thông tin nằm rải nhiều tin (ảnh + chữ) → bấm ☐ chọn nhiều tin → *Tạo công việc* trên thanh "Đã chọn": tên việc lấy câu dài nhất khách viết, mô tả = trích nguyên văn các tin kèm giờ, ảnh trong tin được đính kèm.
+- Hoặc menu ⋯ → *Tạo công việc…*, hoặc nút ＋ ở mục *Công việc* trong panel khách.
+- Tự gắn khách (`person_id`), hội thoại (`conversation_id`) và **cơ hội đang mở** (`lead_id`) → trigger DB cập nhật `next_activity_at` của cơ hội. Giao cho người khác → người đó nhận thông báo đẩy (nếu đã bật 🔔), bấm mở đúng hội thoại.
+- Việc chưa xong hiện: chip "n việc đang mở / quá hạn" trên khung chat, mục *Công việc* trong panel khách, trang Hành động (có link *Mở chat*). Tick = xong.
+- Không cần migration (bảng `crm_activities` đã có `attachments`, `conversation_id`). Loại việc dùng enum sẵn có: `follow_up` (Bám đuổi, mặc định), `call`, `meeting` (Hẹn gặp / lắp đặt), `email`.
+
+**Thư viện → Kho lưu trữ ở cột phải** (giống Zalo): bấm *Thư viện* trên header → cột phải chuyển sang ảnh / video / file / link (lọc theo người gửi), chat vẫn hiện bên cạnh. Nút 💬 trên ảnh/file/link hoặc trong trình xem ảnh → nhảy tới tin gốc (tự tải thêm tin cũ nếu cần). Đổi hội thoại → cột phải về hồ sơ khách.

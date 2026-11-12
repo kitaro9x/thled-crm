@@ -10,6 +10,7 @@ import { ago, cn, convName } from "@/lib/utils";
 import { labelTone } from "@/lib/label-tone";
 import { Thread } from "./Thread";
 import { PersonPanel } from "./PersonPanel";
+import { MediaGallery } from "./MediaGallery";
 
 type QuickFilter = "open" | "closed" | "all" | "unread" | "unanswered" | "important" | "overdue" | "hidden";
 const quick: { k: QuickFilter; l: string }[] = [
@@ -80,6 +81,16 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const [showPanel, setShowPanel] = useState(true); // máy tính: ẩn/hiện cột hồ sơ khách
   useEffect(() => { try { const v = localStorage.getItem("inbox_panel"); if (v !== null) setShowPanel(v === "1"); } catch {} }, []);
   const togglePanel = () => { setShowPanel((v) => { try { localStorage.setItem("inbox_panel", v ? "0" : "1"); } catch {} return !v; }); };
+  // cột phải: hồ sơ khách hoặc Kho lưu trữ (ảnh/video/file/link) — giống Zalo, chat vẫn hiện bên cạnh
+  const [side, setSide] = useState<"person" | "gallery">("person");
+  const isPhone = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+  const toggleGallery = () => { if (isPhone()) { setSide("gallery"); setMobileView("panel"); return; } setSide((s) => (s === "gallery" ? "person" : "gallery")); };
+  const closeGallery = () => { setSide("person"); if (isPhone()) setMobileView("thread"); };
+  // nhảy tới tin gốc trong khung chat (Thread tự tải thêm tin cũ nếu chưa có)
+  const jumpToMessage = (id: string) => {
+    const go = () => { try { window.dispatchEvent(new CustomEvent("crm:jump-to-message", { detail: id })); } catch {} };
+    if (isPhone()) { setMobileView("thread"); setTimeout(go, 60); } else go();
+  };
   const [autoCreate, setAutoCreate] = useState<boolean | null>(null); // công tắc tự tạo khách/cơ hội (nguồn khách hàng)
   useEffect(() => { supabaseBrowser().from("crm_lead_sources").select("is_active").eq("type", "conversation").then(({ data }) => setAutoCreate(!!data?.some((x) => x.is_active))); }, []);
   const toggleAuto = async () => { const n = !autoCreate; setAutoCreate(n); await supabaseBrowser().from("crm_lead_sources").update({ is_active: n }).eq("type", "conversation"); };
@@ -135,6 +146,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
   const curGroup = groups.find((g) => g.key === sel) || groups.find((g) => g.convs.some((c) => c.id === sel)) || null;
   const current = curGroup?.primary || pool.find((c) => c.id === sel) || null;
   useEffect(() => { try { if (current?.id) window.history.replaceState(null, "", `/inbox?c=${current.id}`); } catch {} }, [current?.id]); // eslint-disable-line
+  useEffect(() => { setSide("person"); }, [current?.id]); // đổi hội thoại → cột phải về hồ sơ khách
   // mọi hội thoại của khách này (kể cả ngoài bộ lọc) để thread hiển thị đủ kênh
   const siblings = useMemo(() => current ? (group && current.customer_id ? pool.filter((c) => c.customer_id === current.customer_id && !!c.is_hidden === !!current.is_hidden) : [current]) : [], [pool, current, group]);
 
@@ -187,16 +199,19 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
       </div>
       {/* cột 2: thread */}
       <div className={cn("flex-1 min-w-0 min-h-0 flex-col bg-[#eef1f6]", mobileView === "thread" ? "flex" : "hidden md:flex")}>
-        {current && <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("list")}><ArrowLeft size={16} /></button><div className="font-semibold truncate flex-1">{current.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle group-badge"><Users size={10} />NHÓM</span>}{convName(current)}</div><button className="btn px-2" onClick={() => setMobileView("panel")}><UserRound size={16} /></button></div>}
+        {current && <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("list")}><ArrowLeft size={16} /></button><div className="font-semibold truncate flex-1">{current.kind === "group" && <span className="mr-1 inline-flex items-center gap-0.5 align-middle group-badge"><Users size={10} />NHÓM</span>}{convName(current)}</div><button className="btn px-2" onClick={() => { setSide("person"); setMobileView("panel"); }}><UserRound size={16} /></button></div>}
         {current ? <div className="relative flex-1 min-h-0 flex flex-col">
-          <button className="hidden md:flex absolute top-3 right-3 z-10 btn px-2" title={showPanel ? "Ẩn hồ sơ khách (chat rộng hơn)" : "Hiện hồ sơ khách"} onClick={togglePanel}>{showPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button>
-          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} />
+          {/* bọc div: .btn (CSS ngoài layer) ghi đè "hidden" của Tailwind → trên điện thoại nút này từng đè lên nút ⋯ */}
+          <div className="hidden md:block absolute top-3 right-3 z-10"><button className="btn px-2" title={showPanel ? "Ẩn hồ sơ khách (chat rộng hơn)" : "Hiện hồ sơ khách"} onClick={togglePanel}>{showPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button></div>
+          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} galleryOpen={side === "gallery"} onOpenGallery={toggleGallery} />
         </div> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
       </div>
       {/* cột 3: panel khách */}
-      {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : showPanel ? "hidden md:flex" : "hidden")}>
-        <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("thread")}><ArrowLeft size={16} /></button><div className="font-semibold">Hồ sơ khách</div></div>
-        <PersonPanel key={"p" + current.id} conv={current} members={members} leadBlockedBy={blockingLabel(siblings)} />
+      {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : showPanel || side === "gallery" ? "hidden md:flex" : "hidden")}>
+        {side === "gallery" ? <MediaGallery ids={siblings.map((c) => c.id)} onClose={closeGallery} onJump={jumpToMessage} /> : <>
+          <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("thread")}><ArrowLeft size={16} /></button><div className="font-semibold">Hồ sơ khách</div></div>
+          <PersonPanel key={"p" + current.id} conv={current} members={members} leadBlockedBy={blockingLabel(siblings)} />
+        </>}
       </div>}
     </div>
   );

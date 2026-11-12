@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Phone, Plus, UserPlus, Sparkles, Ban, Trash2, RotateCcw } from "lucide-react";
+import { Phone, Plus, UserPlus, Sparkles, Ban, Trash2, RotateCcw, ClipboardList } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Lead, Person, Stage } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -10,6 +10,7 @@ import { extractPhone } from "@/lib/phone";
 import { money, dt, cn } from "@/lib/utils";
 import { CustomerName, OldNames } from "@/components/CustomerName";
 import { oldNames } from "@/lib/customer-name";
+import { TaskDialog, TaskList, useOpenTasks } from "./Tasks";
 
 /** leadBlockedBy: tên nhãn "Không tạo cơ hội" (Nhà cung cấp, Bạn bè, Gia đình, Shipper, Công nợ…) mà hội thoại đang mang → ẩn mục Cơ hội */
 export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Conversation; members: { id: string; name: string }[]; leadBlockedBy?: string | null }) {
@@ -115,6 +116,16 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
     setIdent((i) => ({ ...(i || {}), meta: { ...(i?.meta || {}), blocked: false } })); load();
   };
   const blocked = !!ident?.meta?.blocked;
+  // Công việc đang mở (lưu ở mục Hành động) của khách / hội thoại
+  const { tasks, markDone } = useOpenTasks(conv);
+  const [newTask, setNewTask] = useState(false);
+  const taskBox = (
+    <div className="pt-2 border-t border-slate-100">
+      <div className="flex items-center justify-between mb-1"><b className="flex items-center gap-1"><ClipboardList size={14} />Công việc ({tasks.length})</b><button className="btn px-2 py-0.5" title="Tạo công việc (lưu vào Hành động)" onClick={() => setNewTask(true)}><Plus size={12} /></button></div>
+      <TaskList tasks={tasks} members={members} onDone={markDone} />
+      {newTask && <TaskDialog conv={conv} members={members} seed={{}} onClose={() => setNewTask(false)} />}
+    </div>
+  );
   // Xoá hội thoại khỏi CRM (ẩn toàn bộ kênh của khách) / Chặn trên Zalo — cũng có trong menu ⋯ của header
   const hideConv = async (hide: boolean) => {
     if (hide && !window.confirm("Xoá hội thoại này khỏi CRM?\nTin nhắn vẫn được lưu, tin mới sẽ không hiện và không báo. Xem lại ở bộ lọc “Đã xoá/chặn”.")) return;
@@ -166,7 +177,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
   };
 
   return (
-    <div className="w-full md:w-[320px] shrink-0 md:border-l border-slate-200 bg-white overflow-y-auto flex-1 md:flex-none">
+    <div className="w-full md:w-[320px] shrink-0 md:border-l border-slate-200 bg-white overflow-y-auto flex-1 min-h-0">
       <div className="p-4 border-b border-slate-100 flex items-center gap-3">
         {conv.kind === "group" ? <GroupAvatar src={conv.identity_avatar} name={conv.display_name} members={(conv as any).meta?.members} size={44} /> : <Avatar src={person?.avatar_url || conv.identity_avatar} name={person?.name || conv.display_name} size={44} />}
         <div className="min-w-0">{person ? <CustomerName person={person} className="font-semibold" onSaved={load} /> : <div className="font-semibold truncate">{conv.display_name}</div>}{person && <Link href={`/cdp/${person.id}`} className="text-xs text-blue-600">Xem khách hàng</Link>}</div>
@@ -177,6 +188,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           <input className="input" placeholder="Tên" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="input" placeholder="Số điện thoại" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <button className="btn btn-primary w-full justify-center" onClick={createPerson} disabled={busy}><Plus size={14} /> Tạo khách hàng</button>
+          {taskBox}
           {friendBox}
           {dangerBox}
         </div>
@@ -192,6 +204,8 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           <Row k="SP quan tâm"><input className="input py-1" defaultValue={(person.custom?.sp_quan_tam as string) || ""} onBlur={async (e) => { await sb.from("crm_customers").update({ custom: { ...person.custom, sp_quan_tam: e.target.value } }).eq("id", person.id); }} /></Row>
           {(person.emotion || conv.emotion) && <Row k="Cảm xúc">{person.emotion || conv.emotion}</Row>}
           <Row k="Nguồn">{({ automation: "Tự động từ hội thoại", manual: "Tạo tay", import: "Nhập file", web: "Website" } as Record<string, string>)[person.source_origin || ""] || person.source_origin || "—"}</Row>
+
+          {taskBox}
 
           {friendBox}
 

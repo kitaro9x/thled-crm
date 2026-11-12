@@ -31,3 +31,18 @@ export async function pushNewMessage(db: ReturnType<typeof supabaseAdmin>, p: { 
     }));
   } catch (e) { console.error("push err", e); }
 }
+
+/** Gửi thông báo đẩy tới MỘT nhân sự (vd. được giao công việc). Best-effort, không ném lỗi. */
+export async function pushToMember(db: ReturnType<typeof supabaseAdmin>, memberId: string, p: { title: string; body: string; url: string; tag: string }) {
+  try {
+    const { data: st } = await db.from("crm_settings").select("value").eq("key", "notifications").maybeSingle();
+    if ((st?.value as any)?.push_enabled === false) return;
+    if (!(await setup(db))) return;
+    const { data: subs } = await db.from("crm_push_subscriptions").select("id,endpoint,keys").eq("member_id", memberId);
+    const payload = JSON.stringify({ title: p.title, body: p.body.slice(0, 140), icon: "/icons/icon-192.png", url: p.url, tag: p.tag });
+    await Promise.all((subs || []).map(async (s: any) => {
+      try { await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload, { TTL: 3600 }); }
+      catch (e: any) { if (e?.statusCode === 404 || e?.statusCode === 410) await db.from("crm_push_subscriptions").delete().eq("id", s.id); }
+    }));
+  } catch (e) { console.error("push member err", e); }
+}

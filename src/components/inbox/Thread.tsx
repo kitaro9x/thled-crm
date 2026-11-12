@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -12,10 +12,10 @@ import { BankCard } from "./BankCard";
 import { LocationCard } from "./LocationCard";
 import { ContactCard } from "./ContactCard";
 import { CallCard } from "./CallCard";
-import { MediaGallery } from "./MediaGallery";
+import { TaskDialog, TaskList, taskSeedFrom, useOpenTasks, type TaskSeed } from "./Tasks";
 import { Lightbox } from "./Lightbox";
 
-export function Thread({ conv, siblings, labels, members, knowledge }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
+export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void }) {
   const sb = supabaseBrowser();
   const all = siblings && siblings.length ? siblings : [conv];
   const ids = all.map((c) => c.id);
@@ -25,8 +25,17 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   // kênh trả lời mặc định: hội thoại có tin khách gửi gần nhất
   const [target, setTarget] = useState<Conversation>(() => [...all].sort((a, b) => (b.last_inbound_at || b.last_message_at || "").localeCompare(a.last_inbound_at || a.last_message_at || ""))[0] || conv);
   const [fwd, setFwd] = useState<{ text?: string | null; attachments?: any[]; items?: { text?: string | null; attachments?: any[] }[] } | null>(null); const [fwdOk, setFwdOk] = useState("");
-  const [showGallery, setShowGallery] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  // công việc (Hành động) tạo từ hội thoại: taskSeed != null → mở hộp tạo việc
+  const [taskSeed, setTaskSeed] = useState<TaskSeed | null>(null);
+  const { tasks, markDone } = useOpenTasks(conv);
+  const [showTasks, setShowTasks] = useState(false); const tasksRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showTasks) return;
+    const onDown = (e: MouseEvent) => { if (tasksRef.current && !tasksRef.current.contains(e.target as Node)) setShowTasks(false); };
+    document.addEventListener("mousedown", onDown); return () => document.removeEventListener("mousedown", onDown);
+  }, [showTasks]);
+  const lateTasks = tasks.filter((a) => a.due_at && new Date(a.due_at).getTime() < Date.now()).length;
   // điện thoại: nhấn giữ tin 450ms → hiện thanh thao tác (trích dẫn / chuyển tiếp / chép / chọn)
   const [touchActions, setTouchActions] = useState<string | null>(null); const lpTimer = useRef<any>(null);
   const lpStart = (id: string) => { lpTimer.current = setTimeout(() => { setTouchActions(id); if (navigator.vibrate) navigator.vibrate(10); }, 450); };
@@ -55,7 +64,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     const el = scroller.current; const before = el ? el.scrollHeight - el.scrollTop : 0;
     const { data } = await sb.from("crm_messages").select("*").in("conversation_id", ids).lt("sent_at", oldest).order("sent_at", { ascending: false }).limit(PAGE);
     const arr = ((data as Message[]) || []).reverse(); setHasMore(arr.length >= PAGE);
-    setMsgs((m) => [...arr, ...m]); setLoadingOld(false);
+    if (arr.length) { skipGrow.current = true; setMsgs((m) => [...arr, ...m]); } setLoadingOld(false);
     requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - before; }); // giữ nguyên vị trí đang đọc
   };
   const [text, setText] = useState("");
@@ -110,6 +119,9 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   const [atBottom, setAtBottom] = useState(true); const [unseen, setUnseen] = useState(0);
   const onScroll = () => { const el = scroller.current; if (!el) return; const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(near); if (near) setUnseen(0); };
   const scrollToBottom = () => { bottom.current?.scrollIntoView({ behavior: "smooth" }); setUnseen(0); };
+  const skipGrow = useRef(false); // vừa chèn tin CŨ lên đầu → không cuộn xuống / không tính là tin mới
+  /** cuộn tới 1 tin và nháy viền vàng */
+  const flash = (id: string) => { const el = document.getElementById("msg-" + id); if (!el) return false; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("ring-2", "ring-amber-400"); setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 1800); return true; };
   const addFiles = (list: FileList | File[]) => {
     const ok = Array.from(list).filter((f) => /^(image\/(jpeg|png|webp|gif)|video\/(mp4|quicktime)|application\/pdf)$/.test(f.type) && f.size <= 25 * 1024 * 1024);
     if (ok.length < Array.from(list).length) setErr("Chỉ nhận ảnh jpg/png/webp/gif, video mp4/mov, PDF — tối đa 25 MB");
@@ -158,10 +170,30 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
   useEffect(() => {
     const grew = msgs.length > prevLen.current; const first = prevLen.current === 0; prevLen.current = msgs.length;
     if (first) return; // lần tải đầu đã xử lý ở trên
+    if (skipGrow.current) { skipGrow.current = false; return; }
     if (atBottom || !grew) bottom.current?.scrollIntoView({ behavior: "smooth" });
     else setUnseen((n) => n + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs.length]);
+  // Kho lưu trữ bấm "Xem trong hội thoại": tin đã tải → cuộn tới; chưa tải → tải từ tin đó tới tin cũ nhất đang có rồi cuộn
+  const msgsRef = useRef(msgs); msgsRef.current = msgs;
+  useEffect(() => {
+    const onJump = async (e: Event) => {
+      const id = (e as CustomEvent<string>).detail; if (!id) return;
+      if (msgsRef.current.some((x) => x.id === id)) { flash(id); return; }
+      const { data: t } = await sb.from("crm_messages").select("id,sent_at,conversation_id").eq("id", id).maybeSingle();
+      if (!t || !ids.includes(t.conversation_id)) return;
+      const oldest = msgsRef.current[0]?.sent_at;
+      let q = sb.from("crm_messages").select("*").in("conversation_id", ids).gte("sent_at", t.sent_at).order("sent_at", { ascending: true }).limit(2000);
+      if (oldest) q = q.lt("sent_at", oldest);
+      const { data } = await q; const arr = (data as Message[]) || [];
+      if (arr.length) { skipGrow.current = true; setMsgs((m) => { const have = new Set(m.map((x) => x.id)); return [...arr.filter((x) => !have.has(x.id)), ...m]; }); }
+      setTimeout(() => flash(id), 120);
+    };
+    window.addEventListener("crm:jump-to-message", onJump);
+    return () => window.removeEventListener("crm:jump-to-message", onJump);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv.id]);
 
   const send = async () => {
     if (!text.trim() && !files.length) return; setSending(true); setErr(null);
@@ -227,8 +259,9 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
     return <div className={cn("flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white shadow-md px-0.5 self-center transition-opacity", picked.size || on || touchActions === m.id ? "opacity-100 msg-actions" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100")}>
       {!picked.size && <>{B("Trích dẫn tin này để trả lời", () => { setReplyTo(m); taRef.current?.focus(); }, <MessageSquareQuote size={15} />)}
       {B("Chuyển tiếp", () => setFwd({ text: m.text, attachments: m.attachments }), <Forward size={15} />)}
-      {m.text && B("Chép nội dung", () => { navigator.clipboard?.writeText(m.text || ""); }, <Copy size={15} />)}</>}
-      {B(on ? "Bỏ chọn" : "Chọn nhiều tin để chuyển tiếp", () => togglePick(m.id), on ? <CheckSquare size={15} /> : <Square size={15} />, on)}
+      {m.text && B("Chép nội dung", () => { navigator.clipboard?.writeText(m.text || ""); }, <Copy size={15} />)}
+      {B("Tạo công việc từ tin này (chọn nhiều tin để gom thông tin)", () => { setTaskSeed(taskSeedFrom([m], conv)); setTouchActions(null); }, <ClipboardPlus size={15} />)}</>}
+      {B(on ? "Bỏ chọn" : "Chọn nhiều tin để chuyển tiếp / tạo công việc", () => togglePick(m.id), on ? <CheckSquare size={15} /> : <Square size={15} />, on)}
     </div>;
   };
   // Tạo đơn hàng từ hội thoại: chưa có hồ sơ khách thì tạo nhanh rồi mở form đơn (kèm lịch hẹn)
@@ -276,16 +309,17 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
 
   return (
     <>
-      <div className="h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
+      <div className="@container h-14 shrink-0 bg-white border-b border-slate-200 px-4 flex items-center gap-3">
         <div className="flex -space-x-1">{Array.from(new Set(all.map((c) => c.channel_type))).map((t) => <ChannelIcon key={t} type={t} size={22} />)}</div>
         <div className="min-w-0"><div className="font-semibold truncate flex items-center gap-1">{conv.kind === "group" && <span className="inline-flex items-center gap-0.5 group-badge shrink-0"><Users size={10} />NHÓM</span>}<span className="truncate">{convName(conv)}</span>{conv.is_important && <Star size={14} className="fill-amber-400 text-amber-400 shrink-0" />}<button title={conv.kind === "group" ? "Đổi tên nhóm trong CRM" : conv.customer_id ? "Đổi tên khách (tên cũ vẫn được lưu)" : "Đổi tên hiển thị trong CRM"} onClick={renameGroup} className="p-0.5 text-slate-400 hover:text-blue-600 shrink-0"><Pencil size={12} /></button></div><div className="text-xs text-slate-500 truncate">{conv.kind === "group" ? `Nhóm Zalo · ${((conv as any).meta?.members?.length || 0) > 0 ? `${(conv as any).meta.members.length} thành viên` : "Tên gốc: " + (conv.display_name || "")}` : (multi ? all.map((c) => c.channel_name + (c.kind === "comment" ? " (bình luận)" : "")).join(" · ") : conv.channel_name)}{conv.kind === "group" && (conv as any).meta?.alias && ` · Tên gốc: ${conv.display_name}`}{conv.kind !== "group" && conv.display_name && convName(conv) !== conv.display_name && ` · Tên gốc: ${conv.display_name}`}{conv.person_phone && ` · ${conv.person_phone}`}</div></div>
-        <div ref={headRef} className="ml-auto flex items-center gap-1 relative md:mr-10">
-          <button className={cn("tbtn", showLabels && "active")} title="Gắn nhãn cho hội thoại" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); setShowMore(false); }}><Tag size={15} /><span className="hidden lg:inline">Nhãn</span></button>
-          <button className={cn("tbtn", showAssign && "active")} title="Giao hội thoại cho nhân viên" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); setShowMore(false); }}><UserPlus size={15} /><span className="hidden lg:inline">Giao cho</span></button>
-          <button className="tbtn" title={conv.kind === "group" ? "Tạo đơn hàng + lịch hẹn cho nhóm này" : "Tạo đơn hàng + lịch hẹn cho khách này"} onClick={createOrder}><ShoppingCart size={15} /><span className="hidden lg:inline">Tạo đơn</span></button>
-          <button className="tbtn" title="Thư viện ảnh / video / file / link" onClick={() => setShowGallery(true)}><Images size={15} /><span className="hidden lg:inline">Thư viện</span></button>
+        <div ref={headRef} className="ml-auto flex items-center gap-1 relative md:mr-10 shrink-0">
+          <button className={cn("tbtn", showLabels && "active")} title="Gắn nhãn cho hội thoại" onClick={() => { setShowLabels((v) => !v); setShowAssign(false); setShowMore(false); }}><Tag size={15} /><span className="hidden @4xl:inline">Nhãn</span></button>
+          <button className={cn("tbtn", showAssign && "active")} title="Giao hội thoại cho nhân viên" onClick={() => { setShowAssign((v) => !v); setShowLabels(false); setShowMore(false); }}><UserPlus size={15} /><span className="hidden @4xl:inline">Giao cho</span></button>
+          <button className="tbtn" title={conv.kind === "group" ? "Tạo đơn hàng + lịch hẹn cho nhóm này" : "Tạo đơn hàng + lịch hẹn cho khách này"} onClick={createOrder}><ShoppingCart size={15} /><span className="hidden @4xl:inline">Tạo đơn</span></button>
+          <button className={cn("tbtn", galleryOpen && "active")} title="Kho lưu trữ: ảnh / video / file / link (mở ở cột bên phải)" onClick={onOpenGallery}><Images size={15} /><span className="hidden @4xl:inline">Thư viện</span></button>
           <button className={cn("tbtn", showMore && "active")} title="Thêm thao tác" onClick={() => { setShowMore((v) => !v); setShowLabels(false); setShowAssign(false); }}><MoreHorizontal size={16} /></button>
           {showMore && <div className="absolute right-0 top-10 z-10 card p-1.5 w-60 shadow-lg text-sm">
+            <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" title="Lưu vào mục Hành động, gắn với khách & cơ hội" onClick={() => { setTaskSeed({}); setShowMore(false); }}><ClipboardPlus size={15} />Tạo công việc…</button>
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id); setShowMore(false); }}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} />{conv.is_important ? "Bỏ đánh dấu quan trọng" : "Đánh dấu quan trọng"}</button>
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id); setShowMore(false); }}><Check size={15} />{conv.status === "open" ? "Đóng hội thoại (đã xử lý xong)" : "Mở lại hội thoại"}</button>
             <a className="hidden md:flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer" onClick={() => setShowMore(false)}><ExternalLink size={15} />Mở ở tab mới</a>
@@ -301,9 +335,17 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           {showAssign && <div className="absolute right-0 top-10 z-10 card p-2 w-56 shadow-lg">{members.map((m) => <button key={m.id} onClick={() => assign(m.id)} className="block w-full text-left py-1.5 px-2 rounded hover:bg-slate-50 text-sm">{m.name}</button>)}</div>}
         </div>
       </div>
-      {convLabels.length > 0 && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}</div>}
+      {(convLabels.length > 0 || tasks.length > 0) && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap items-center relative">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}
+        {tasks.length > 0 && <div ref={tasksRef} className="ml-auto">
+          <button onClick={() => setShowTasks((v) => !v)} title="Công việc đang mở của khách này (mục Hành động)" className={cn("lchip cursor-pointer gap-1", lateTasks ? "lchip-red" : "lchip-amber")}><ClipboardList size={12} />{lateTasks ? `${lateTasks}/${tasks.length} việc quá hạn` : `${tasks.length} việc đang mở`}</button>
+          {showTasks && <div className="absolute right-3 top-full mt-1 z-20 card shadow-lg w-80 max-w-[calc(100vw-24px)] p-2 max-h-96 overflow-y-auto text-sm">
+            <div className="flex items-center justify-between mb-1.5"><b>Công việc đang mở</b><button className="btn px-2 py-0.5 text-xs" onClick={() => { setTaskSeed({}); setShowTasks(false); }}><Plus size={12} />Tạo</button></div>
+            <TaskList tasks={tasks} members={members} onDone={markDone} onImage={(url) => { const k = allImages.findIndex((x) => x.url === url); if (k >= 0) setLb(k); else window.open(url, "_blank"); }} />
+          </div>}
+        </div>}
+      </div>}
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
-      {showGallery && <MediaGallery ids={ids} onClose={() => setShowGallery(false)} />}
+      {taskSeed && <TaskDialog conv={conv} members={members} seed={taskSeed} onClose={(r) => { setTaskSeed(null); if (r) { setPicked(new Set()); setFwdOk(`Đã tạo công việc${r.assignee ? " · giao " + r.assignee : ""}${r.due ? " · hạn " + r.due : ""}`); setTimeout(() => setFwdOk(""), 3500); } }} />}
       {lb !== null && allImages.length > 0 && <Lightbox images={allImages} index={lb} onClose={() => setLb(null)} />}
       {(() => { const ai = (conv as any).meta?.ai_meta; if (conv.channel_type !== "fb_page" || !ai) return null; const ref = ai.standby ? ai.standby_at : ai.last_at; if (!ref) return null; const fresh = Date.now() - new Date(ref).getTime() < 48 * 3600000; if (!fresh && !ai.standby) return null; return (
         <div className={cn("shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs border-b", ai.taken_over ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-violet-50 border-violet-100 text-violet-800")}>
@@ -311,7 +353,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
           <button className="btn px-2 py-1 text-xs ml-auto" disabled={handoverBusy} onClick={() => handover(ai.taken_over ? "release" : "take")}>{handoverBusy ? "Đang xử lý…" : ai.taken_over ? "Trả lại cho AI Meta" : "Tôi tự trả lời"}</button>
           {handoverMsg && <span className="w-full text-red-600">{handoverMsg}</span>}
         </div>); })()}
-      {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
+      {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" title="Gom các tin đã chọn (chữ + ảnh) thành 1 công việc trong mục Hành động" onClick={() => setTaskSeed(taskSeedFrom(msgs.filter((x) => picked.has(x.id)), conv))}><ClipboardPlus size={14} className="inline mr-1" />Tạo công việc</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
       {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
       <div ref={scroller} onScroll={onScroll} onClick={(e) => { if (touchActions && !(e.target as HTMLElement).closest(".msg-actions")) setTouchActions(null); }} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">
@@ -324,7 +366,7 @@ export function Thread({ conv, siblings, labels, members, knowledge }: { conv: C
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <img key={i} src={a.url} alt="" className="rounded-lg max-h-60 mb-1 cursor-zoom-in hover:opacity-95" onLoad={() => { if (atBottom) jumpBottom(); }} onClick={() => { const k = allImages.findIndex((x) => x.url === a.url); setLb(k >= 0 ? k : 0); }} /> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[12px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
               {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const target = q.msg_id ? msgs.find((x) => x.external_msg_id === q.msg_id) : null; return (
-                <button onClick={() => { if (!target) return; const el = document.getElementById("msg-" + target.id); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("ring-2", "ring-amber-400"); setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 1800); } }} title={target ? "Nhảy tới tin gốc" : "Tin gốc không nằm trong phần đã tải"} className={cn("mb-1.5 w-full text-left flex gap-2 items-center rounded-md border-l-4 px-2 py-1.5 text-xs", m.direction === "out" ? "bg-black/15 border-white/60 text-white/90" : "bg-slate-100 border-blue-500 text-slate-700", target && "cursor-pointer hover:opacity-90")}>
+                <button onClick={() => { if (target) flash(target.id); }} title={target ? "Nhảy tới tin gốc" : "Tin gốc không nằm trong phần đã tải"} className={cn("mb-1.5 w-full text-left flex gap-2 items-center rounded-md border-l-4 px-2 py-1.5 text-xs", m.direction === "out" ? "bg-black/15 border-white/60 text-white/90" : "bg-slate-100 border-blue-500 text-slate-700", target && "cursor-pointer hover:opacity-90")}>
                   {q.thumb && <img src={q.thumb} alt="" className="w-10 h-10 rounded object-cover shrink-0" />}
                   <div className="min-w-0"><div className="font-semibold truncate">{q.from || "Tin nhắn"}</div><div className="truncate opacity-80">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.kind === "video" ? "[Video]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
                 </button>); })()}
