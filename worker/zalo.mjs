@@ -10,7 +10,7 @@
  *  1. Đăng nhập bằng QR (ghi QR vào crm_zalo_worker.qr_image → hiện trên màn Cài đặt kênh)
  *  2. Lắng nghe tin nhắn đến → ingest qua /api/internal/ingest (dùng CRON_SECRET)
  *  3. Gửi crm_outbox cho kênh zalo_personal
- *  4. Gửi lời mời kết bạn từ crm_zalo_friend_tasks (theo SĐT hoặc theo UID) + tin nhắn sau khi kết bạn
+ *  4. Gửi lời mời kết bạn từ crm_zalo_friend_tasks (theo SĐT hoặc theo UID) + lời chào khi khách đồng ý kết bạn
  *  5. Đồng bộ trạng thái bạn bè → identity.meta.is_friend; chặn/bỏ chặn theo crm_zalo_actions
  */
 import { createClient } from "@supabase/supabase-js";
@@ -32,6 +32,18 @@ async function fetchAttachment(a) {
 }
 /** Gửi 1 tin kèm đính kèm qua Zalo: ảnh/file → sendMessage(attachments); video → sendVideo (cần URL public) */
 // Thành viên nhóm → crm_conversations.meta.members (CRM gợi ý khi gõ @)
+/** Lời chào mặc định gửi khi khách đồng ý kết bạn — sửa trong CRM: Cài đặt → Kênh (crm_settings.zalo_welcome). Giữ đồng bộ với src/lib/crm/zaloWelcome.ts */
+const WELCOME_DEFAULT = {
+  enabled: true,
+  skip_if_chatted: true,
+  text: `Xin chào, hệ thống showroom THLED Trung Hiếu Đồng nai, cung cấp toàn bộ các sản phẩm thiết bị điện chiều sáng: Âm trần, thanh ray nam châm, dây led, vật tư led trần và cầu thang, công tắc ổ cắm, đèn trang trí và quạt trần giá và chính sách bảo hành đổi trả cực tốt. Anh chị cần gì cứ báo bên em báo giá ạ.
+--------
+💒Showroom 1: 126/13 Phạm Văn Thuân, Phường Tam Hiệp, Biên Hòa, Đồng Nai(Gần ngã ba bitis)
+💒Showroom 2: 824B Ngũ Phúc, Trảng Bom, Đồng Nai( cạnh cây xăng 999)
+💒Showroom 3: Long Thành, Đồng Nai
+📱Hotline tư vấn, báo giá, phản ánh dịch vụ:  0966 931 056`,
+};
+const frCheckedAt = new Map(); // friend task id -> lần cuối kiểm tra đã chấp nhận kết bạn chưa
 const groupMembers = new Map(); // groupId -> [{id,name}]
 async function saveGroupMembers(api, gid, g) {
   try {
@@ -221,6 +233,40 @@ async function main() {
   const setIdentityMeta = async (uid, patch) => { const { data: i } = await sb.from("crm_identities").select("id,meta").eq("channel_id", ownCh.id).eq("external_id", String(uid)).maybeSingle(); if (i) await sb.from("crm_identities").update({ meta: { ...(i.meta || {}), ...patch } }).eq("id", i.id); };
   /** tra cứu theo UID (hội thoại Zalo đã biết uid, có thể chưa có SĐT) → cùng dạng kết quả với findUser */
   const lookupUid = async (uid) => { const info = await api.getUserInfo(String(uid)).catch(() => null); const p = info?.changed_profiles?.[String(uid)] || info?.unchanged_profiles?.[String(uid)]; return p ? { uid: String(uid), display_name: p.displayName, zalo_name: p.zaloName, avatar: p.avatar, isFr: p.isFr } : null; };
+  /** đã từng nhắn tin qua lại với uid này trên Zalo chưa (có tin trong hội thoại 1-1) */
+  const hadChat = async (uid) => {
+    const { data: i } = await sb.from("crm_identities").select("id").eq("channel_id", ownCh.id).eq("external_id", String(uid)).maybeSingle(); if (!i) return false;
+    const { data: cs } = await sb.from("crm_conversations").select("id").eq("identity_id", i.id); if (!cs?.length) return false;
+    const { count } = await sb.from("crm_messages").select("id", { count: "exact", head: true }).in("conversation_id", cs.map((c) => c.id));
+    return (count || 0) > 0;
+  };
+  /** Lời chào sau khi khách đồng ý kết bạn: ưu tiên tin riêng của luật tự động (after_accept_message), không có thì dùng lời chào mặc định (Cài đặt → Kênh) */
+  const sendWelcome = async (t, name) => {
+    try {
+      const { data: st } = await sb.from("crm_settings").select("value").eq("key", "zalo_welcome").maybeSingle();
+      const cfg = { ...WELCOME_DEFAULT, ...(st?.value || {}) };
+      let raw = t.after_accept_message || (cfg.enabled ? cfg.text : "") || "";
+      // dòng chỉ gồm "/shortcut" (vd /ztonghop) → nội dung tin nhắn nhanh tương ứng (Kho kiến thức)
+      const keys = [...new Set(raw.split("\n").map((l) => l.trim()).filter((l) => /^\/[\w-]+$/.test(l)))];
+      if (keys.length) {
+        const { data: kb } = await sb.from("crm_knowledge").select("shortcut,content").in("shortcut", keys);
+        const map = new Map((kb || []).map((k) => [String(k.shortcut).toLowerCase(), k.content]));
+        raw = raw.split("\n").map((l) => map.get(l.trim().toLowerCase()) ?? l).join("\n");
+      }
+      const text = raw.replace(/\{fullname\}/g, name || "anh/chị").replace(/\{gender\}/g, "anh/chị").trim();
+      if (!text) return;
+      if (cfg.skip_if_chatted !== false && await hadChat(t.zalo_uid)) { console.log("Bỏ lời chào (đã có hội thoại):", t.zalo_uid); return; }
+      await sleep(rnd(3000, 8000)); // không gửi ngay tức thì sau khi khách bấm đồng ý
+      // ghi vào CRM TRƯỚC rồi mới gửi: listener (selfListen) nhận lại tin này sẽ khớp bản ghi worker-… và chỉ cập nhật mã tin, không ghi đôi
+      await recordOutgoing(own, t.zalo_uid, name, text);
+      await api.sendMessage(text, t.zalo_uid, ThreadType.User);
+      console.log("Đã gửi lời chào:", t.zalo_uid);
+    } catch (e) {
+      console.error("sendWelcome", e.message);
+      await sb.from("crm_zalo_friend_tasks").update({ last_error: "Gửi lời chào lỗi: " + e.message }).eq("id", t.id);
+      if (isSessionError(e)) await checkSession(api);
+    }
+  };
   await reconcileQueued();
   setInterval(() => checkSession(api), 5 * 60000); // mỗi 5 phút: phiên chết → need_qr + thoát (pm2 khởi động lại vào luồng QR)
 
@@ -517,21 +563,22 @@ async function main() {
           } catch (e) { await sb.from("crm_zalo_friend_tasks").update({ status: t.attempts >= 2 ? "failed" : "todo", last_error: e.message, attempts: t.attempts + 1 }).eq("id", t.id); }
         }
       }
-      // kiểm tra kết bạn đã được chấp nhận → gửi tin sau khi kết bạn
-      const { data: sent } = await sb.from("crm_zalo_friend_tasks").select("*").eq("status", "sent").not("zalo_uid", "is", null).limit(10);
-      for (const t of sent || []) {
-        const info = await api.getUserInfo(t.zalo_uid).catch(() => null); const p = info?.changed_profiles?.[t.zalo_uid];
+      // kiểm tra kết bạn đã được chấp nhận → gửi lời chào sau khi kết bạn
+      // Mỗi lời mời chỉ kiểm tra ~3 phút/lần, tối đa 5 người/vòng, chỉ lời mời trong 14 ngày gần nhất (tránh gọi getUserInfo dồn dập → Zalo hạn chế)
+      const since = new Date(Date.now() - 14 * 86400000).toISOString();
+      const { data: sent } = await sb.from("crm_zalo_friend_tasks").select("*").eq("status", "sent").not("zalo_uid", "is", null).gte("done_at", since).order("done_at", { ascending: false }).limit(200);
+      const due = (sent || []).filter((t) => Date.now() - (frCheckedAt.get(t.id) || 0) > 3 * 60000).slice(0, 5);
+      for (const t of due) {
+        frCheckedAt.set(t.id, Date.now());
+        const info = await api.getUserInfo(t.zalo_uid).catch(() => null); const p = info?.changed_profiles?.[t.zalo_uid] || info?.unchanged_profiles?.[t.zalo_uid];
         if (p?.isFr === 1) {
           await sb.from("crm_zalo_friend_tasks").update({ status: "accepted", accepted_at: new Date().toISOString() }).eq("id", t.id);
           await setIdentityMeta(t.zalo_uid, { is_friend: true });
-          console.log("Đã kết bạn:", t.phone, t.zalo_name);
-          if (t.after_accept_message) {
-            // ghi vào CRM TRƯỚC rồi mới gửi: listener (selfListen) nhận lại tin này sẽ khớp bản ghi worker-… và chỉ cập nhật mã tin, không ghi đôi
-            await recordOutgoing(own, t.zalo_uid, t.zalo_name || p.displayName || p.zaloName, t.after_accept_message);
-            await api.sendMessage(t.after_accept_message, t.zalo_uid, ThreadType.User);
-            await sleep(rnd(2000, 4000));
-          }
+          const name = t.zalo_name || p.displayName || p.zaloName || "";
+          console.log("Đã kết bạn:", t.phone || t.zalo_uid, name);
+          await sendWelcome(t, name);
         }
+        await sleep(rnd(800, 1500));
       }
     } catch (e) { console.error("loop err", e.message); await setWorker({ last_error: e.message }); }
     await waitTick(5000);

@@ -2,8 +2,10 @@
 import Link from "next/link";
 import { useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { MessageSquare } from "lucide-react";
 import { cn, dt } from "@/lib/utils";
-const label: Record<string, string> = { call: "Gọi", meeting: "Họp", follow_up: "Follow up", email: "Email", note: "Ghi chú" };
+const label: Record<string, string> = { call: "Gọi", meeting: "Họp", follow_up: "Bám đuổi", email: "Email", note: "Ghi chú" };
+const prio: Record<string, string> = { high: "Gấp", medium: "Bình thường", normal: "Bình thường", low: "Thấp" };
 export function ActivitiesClient({ items }: { items: any[] }) {
   const [list, setList] = useState(items);
   const toggle = async (a: any) => {
@@ -19,8 +21,13 @@ export function ActivitiesClient({ items }: { items: any[] }) {
           <div key={a.id} className="flex items-center gap-3 p-3 text-sm">
             <input type="checkbox" checked={a.is_done} onChange={() => toggle(a)} />
             <span className="chip bg-slate-100 w-20 justify-center">{label[a.type]}</span>
-            <div className="flex-1 min-w-0"><div className={cn("font-medium", a.is_done && "line-through text-slate-400")}>{a.title}</div><div className="text-xs text-slate-500">{a.crm_leads?.title && <Link href={`/leads?lead=${a.lead_id}`} className="text-blue-600">{a.crm_leads.title}</Link>}{a.crm_customers?.phone && ` · ${a.crm_customers.phone}`}{a.customer_busy && " · khách bận"}</div></div>
-            <span className={cn("chip", a.priority === "high" ? "bg-red-50 text-red-600" : a.priority === "low" ? "bg-slate-100" : "bg-amber-50 text-amber-700")}>{a.priority}</span>
+            <div className="flex-1 min-w-0">
+              <div className={cn("font-medium", a.is_done && "line-through text-slate-400")} title={a.description || undefined}>{a.title}</div>
+              <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-1">{a.crm_customers?.name && <span className="text-slate-700">{a.crm_customers.name}</span>}{a.crm_customers?.phone && <span>· {a.crm_customers.phone}</span>}{a.crm_leads?.title && <>· <Link href={`/leads?lead=${a.lead_id}`} className="text-blue-600">{a.crm_leads.title}</Link></>}{a.customer_busy && " · khách bận"}
+                {a.conversation_id && <Link href={`/inbox?c=${a.conversation_id}`} className="inline-flex items-center gap-0.5 text-blue-600 hover:underline ml-1" title="Mở hội thoại đã tạo công việc này"><MessageSquare size={11} />Mở chat</Link>}</div>
+              {Array.isArray(a.attachments) && a.attachments.some((x: any) => x.type === "image") && <div className="flex gap-1 mt-1">{a.attachments.filter((x: any) => x.type === "image").slice(0, 4).map((x: any, i: number) => <a key={i} href={x.url} target="_blank" rel="noreferrer"><img src={x.url} alt="" className="w-9 h-9 rounded object-cover border border-slate-200" /></a>)}</div>}
+            </div>
+            <span className={cn("chip", a.priority === "high" ? "bg-red-50 text-red-600" : a.priority === "low" ? "bg-slate-100" : "bg-amber-50 text-amber-700")}>{prio[a.priority] || a.priority}</span>
             <span className="text-slate-500 w-32">{a.crm_members?.name || "—"}</span>
             <span className={cn("w-28 text-right", overdue(a) ? "text-red-600 font-medium" : "text-slate-500")}>{a.due_at ? dt(a.due_at, "HH:mm dd/MM") : ""}</span>
           </div>

@@ -42,6 +42,7 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 
 - Chỉ dùng **số phụ** (Lyly), không dùng Zalo chính. Không bấm "đăng xuất thiết bị khác" trên điện thoại.
 - Kết bạn tự động: `friend_daily_limit` mặc định 15/ngày, delay 20–60s. Tuần đầu nên 5–10.
+- Lời chào khi khách đồng ý kết bạn: sửa ở *Cài đặt → Kênh* (`crm_settings.zalo_welcome`; chưa lưu lần nào thì worker dùng mẫu mặc định trong `worker/zalo.mjs`). Luật tự động có điền "Tin nhắn gửi sau lời mời kết bạn" thì ưu tiên tin của luật. Mặc định bỏ qua nếu khách đã từng nhắn với Zalo này. Worker kiểm tra lời mời đã gửi trong 14 ngày, mỗi người ~3 phút/lần, ≤5 người/vòng → lời chào có thể trễ vài phút sau khi khách bấm đồng ý.
 - Nếu Zalo báo hạn chế → tắt kết bạn vài ngày (đặt limit = 0), không cố.
 - Đã chuyển sang VPS Việt Nam (Vietnix) 09/11/2026 để giảm việc Zalo thu hồi phiên; vẫn có thể bị hỏi "Đó là tôi" trên điện thoại khi đổi IP.
 - Phương án dự phòng: chạy worker trên máy tính cửa hàng — code không đổi.
@@ -75,3 +76,13 @@ Worker tự chạy lại khi VPS reboot (pm2 startup đã bật). Session Zalo l
 ## 8. Việc cần làm sau khi chuyển VPS (09/11/2026)
 - Huỷ VPS Vultr `207.148.73.195` sau 2–3 ngày nếu Vietnix ổn (đang `pm2 stop`).
 - **Đổi khoá** `SUPABASE_SERVICE_ROLE_KEY` và `CRON_SECRET`: đã lộ qua ảnh chụp màn hình khi cài. Thứ tự: Supabase → tạo key mới → cập nhật Vercel (CRM + web thled.vn nếu dùng chung) → `/opt/thled-crm/.env.local` trên Vietnix → `pm2 restart zalo` → thu hồi key cũ. Làm lúc vắng khách.
+
+## 9. Công việc từ hội thoại & Kho lưu trữ — thêm 12/11/2026
+**Tạo công việc ngay trong chat** (lưu vào bảng `crm_activities` = mục **Hành động**, không có bảng riêng):
+- Rê chuột lên tin (điện thoại: nhấn giữ) → icon 📋+ *Tạo công việc từ tin này*. Thông tin nằm rải nhiều tin (ảnh + chữ) → bấm ☐ chọn nhiều tin → *Tạo công việc* trên thanh "Đã chọn": tên việc lấy câu dài nhất khách viết, mô tả = trích nguyên văn các tin kèm giờ, ảnh trong tin được đính kèm.
+- Hoặc menu ⋯ → *Tạo công việc…*, hoặc nút ＋ ở mục *Công việc* trong panel khách.
+- Tự gắn khách (`person_id`), hội thoại (`conversation_id`) và **cơ hội đang mở** (`lead_id`) → trigger DB cập nhật `next_activity_at` của cơ hội. Giao cho người khác → người đó nhận thông báo đẩy (nếu đã bật 🔔), bấm mở đúng hội thoại.
+- Việc chưa xong hiện: chip "n việc đang mở / quá hạn" trên khung chat, mục *Công việc* trong panel khách, trang Hành động (có link *Mở chat*). Tick = xong.
+- Không cần migration (bảng `crm_activities` đã có `attachments`, `conversation_id`). Loại việc dùng enum sẵn có: `follow_up` (Bám đuổi, mặc định), `call`, `meeting` (Hẹn gặp / lắp đặt), `email`.
+
+**Thư viện → Kho lưu trữ ở cột phải** (giống Zalo): bấm *Thư viện* trên header → cột phải chuyển sang ảnh / video / file / link (lọc theo người gửi), chat vẫn hiện bên cạnh. Nút 💬 trên ảnh/file/link hoặc trong trình xem ảnh → nhảy tới tin gốc (tự tải thêm tin cũ nếu cần). Đổi hội thoại → cột phải về hồ sơ khách.
