@@ -106,6 +106,32 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [showQuick]);
   // tìm không dấu, không cần gõ "/": khớp tiêu đề/phím tắt, hoặc từ bắt đầu bằng từ khoá trong nội dung
+  // trích dẫn → tìm tin gốc: khớp msgId (globalMsgId) hoặc cliMsgId; chưa tải → hỏi DB rồi tải dần tới tin đó
+  const quoteHit = (q: any, x: Message) => (q.msg_id && x.external_msg_id === String(q.msg_id)) || (q.cli_id && String((x as any).raw?.zq?.cliMsgId ?? "") === String(q.cli_id));
+  const [quoteNote, setQuoteNote] = useState<{ id: string; text: string } | null>(null);
+  const flash = (id: string) => { const el = document.getElementById("msg-" + id); if (!el) return false; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("ring-2", "ring-amber-400", "bg-amber-50/40"); setTimeout(() => el.classList.remove("ring-2", "ring-amber-400", "bg-amber-50/40"), 2200); return true; };
+  const jumpToQuote = async (from: Message, q: any) => {
+    setQuoteNote(null);
+    const local = msgs.find((x) => quoteHit(q, x)); if (local && flash(local.id)) return;
+    if (!q.msg_id && !q.cli_id) { setQuoteNote({ id: from.id, text: "Tin trích dẫn này không có mã tin gốc — không định vị được." }); return; }
+    setQuoteNote({ id: from.id, text: "Đang tìm tin gốc…" });
+    let found: Message | null = null;
+    if (q.msg_id) { const { data } = await sb.from("crm_messages").select("*").in("conversation_id", ids).eq("external_msg_id", String(q.msg_id)).limit(1); found = (data as Message[])?.[0] || null; }
+    if (!found && q.cli_id) { const { data } = await sb.from("crm_messages").select("*").in("conversation_id", ids).eq("raw->zq->>cliMsgId", String(q.cli_id)).limit(1); found = (data as Message[])?.[0] || null; }
+    if (!found) { setQuoteNote({ id: from.id, text: "Không tìm thấy tin gốc trong CRM (có thể gửi trước khi kết nối Zalo vào CRM, hoặc đã bị thu hồi)." }); return; }
+    const oldest = msgs[0]?.sent_at;
+    if (oldest && (found.sent_at || "") < oldest) {
+      // tải toàn bộ tin từ tin gốc tới phần đang có (giới hạn 2000 tin để không treo trình duyệt)
+      const { data } = await sb.from("crm_messages").select("*").in("conversation_id", ids).gte("sent_at", found.sent_at).lt("sent_at", oldest).order("sent_at", { ascending: true }).limit(2000);
+      const arr = (data as Message[]) || [];
+      setMsgs((m) => { const have = new Set(m.map((x) => x.id)); return [...arr.filter((x) => !have.has(x.id)), ...m]; });
+    } else if (!msgs.some((x) => x.id === found!.id)) {
+      setMsgs((m) => [...m, found!].sort((a, b) => (a.sent_at || a.created_at || "").localeCompare(b.sent_at || b.created_at || "")));
+    }
+    setQuoteNote(null);
+    // chờ React vẽ xong rồi cuộn tới
+    let tries = 0; const go = () => { if (flash(found!.id) || ++tries > 20) return; setTimeout(go, 80); }; setTimeout(go, 60);
+  };
   const norm = (t: string) => (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
   const matchQuick = (k: { title: string; shortcut?: string | null; content: string }, q: string) => {
     const nq = norm(q).replace(/^\//, "").trim(); if (!nq) return true;
@@ -121,7 +147,6 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
   const scrollToBottom = () => { bottom.current?.scrollIntoView({ behavior: "smooth" }); setUnseen(0); };
   const skipGrow = useRef(false); // vừa chèn tin CŨ lên đầu → không cuộn xuống / không tính là tin mới
   /** cuộn tới 1 tin và nháy viền vàng */
-  const flash = (id: string) => { const el = document.getElementById("msg-" + id); if (!el) return false; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("ring-2", "ring-amber-400"); setTimeout(() => el.classList.remove("ring-2", "ring-amber-400"), 1800); return true; };
   const addFiles = (list: FileList | File[]) => {
     const ok = Array.from(list).filter((f) => /^(image\/(jpeg|png|webp|gif)|video\/(mp4|quicktime)|application\/pdf)$/.test(f.type) && f.size <= 25 * 1024 * 1024);
     if (ok.length < Array.from(list).length) setErr("Chỉ nhận ảnh jpg/png/webp/gif, video mp4/mov, PDF — tối đa 25 MB");
@@ -362,19 +387,29 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           <div key={m.id} id={"msg-" + m.id} onTouchStart={() => lpStart(m.id)} onTouchEnd={lpEnd} onTouchMove={lpEnd} onContextMenu={(e) => { if (isMobile) e.preventDefault(); }} className={cn("flex group items-center gap-1.5 rounded-xl transition py-0.5 select-none md:select-text", m.direction === "out" ? "justify-end" : "justify-start")}>
             {multi && m.direction !== "out" && <span className="mr-1 mt-2 shrink-0 self-start"><ChannelIcon type={byId[m.conversation_id]?.channel_type} size={14} /></span>}
             {m.direction === "out" && renderActions(m)}
-            <div className={cn("max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (m.status === "failed" ? "bg-red-600 text-white rounded-br-sm" : byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
+            <div className={cn("relative max-w-[70%] lg:max-w-[640px] rounded-2xl px-3.5 py-2 text-[15px] leading-[1.5] shadow-sm", m.reactions && Object.keys(m.reactions).length > 0 && "mb-3", (m as any).raw?.call ? "!bg-transparent !shadow-none !p-0" : m.direction === "out" ? (m.status === "failed" ? "bg-red-600 text-white rounded-br-sm" : byId[m.conversation_id]?.channel_type === "zalo_personal" ? "bg-green-600 text-white rounded-br-sm" : "bg-blue-600 text-white rounded-br-sm") : "bg-white rounded-bl-sm")}>
               {m.attachments?.filter((a) => (a.type as string) !== "link").map((a, i) => a.type === "image" ? <img key={i} src={a.url} alt="" className="rounded-lg max-h-60 mb-1 cursor-zoom-in hover:opacity-95" onLoad={() => { if (atBottom) jumpBottom(); }} onClick={() => { const k = allImages.findIndex((x) => x.url === a.url); setLb(k >= 0 ? k : 0); }} /> : a.type === "video" ? <video key={i} src={a.url} controls className="rounded-lg max-h-60 mb-1 max-w-full" /> : a.type === "audio" ? <audio key={i} src={a.url} controls className="mb-1 max-w-full" /> : <a key={i} href={a.url} target="_blank" className="underline block mb-1">📎 {a.name || a.type}</a>)}
               {m.direction === "in" && (m as any).sender_name && <div className="text-[12px] font-semibold text-blue-700 mb-0.5">{(m as any).sender_name}</div>}
-              {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const target = q.msg_id ? msgs.find((x) => x.external_msg_id === q.msg_id) : null; return (
-                <button onClick={() => { if (target) flash(target.id); }} title={target ? "Nhảy tới tin gốc" : "Tin gốc không nằm trong phần đã tải"} className={cn("mb-1.5 w-full text-left flex gap-2 items-center rounded-md border-l-4 px-2 py-1.5 text-xs", m.direction === "out" ? "bg-black/15 border-white/60 text-white/90" : "bg-slate-100 border-blue-500 text-slate-700", target && "cursor-pointer hover:opacity-90")}>
+              {(m as any).raw?.quote && (() => { const q = (m as any).raw.quote; const canJump = !!(q.msg_id || q.cli_id); return (<>
+                <button onClick={() => jumpToQuote(m, q)} title={canJump ? "Bấm để xem tin gốc" : "Không có mã tin gốc"} className={cn("mb-1.5 w-full text-left flex gap-2 items-center rounded-md border-l-4 px-2 py-1.5 text-xs", m.direction === "out" ? "bg-black/15 border-white/60 text-white/90" : "bg-slate-100 border-blue-500 text-slate-700", canJump && "cursor-pointer hover:brightness-95")}>
                   {q.thumb && <img src={q.thumb} alt="" className="w-10 h-10 rounded object-cover shrink-0" />}
                   <div className="min-w-0"><div className="font-semibold truncate">{q.from || "Tin nhắn"}</div><div className="truncate opacity-80">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.kind === "video" ? "[Video]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
-                </button>); })()}
+                </button>
+                {quoteNote?.id === m.id && <div className={cn("mb-1.5 text-[11px] italic", m.direction === "out" ? "text-white/80" : "text-amber-700")}>{quoteNote.text}</div>}</>); })()}
               {m.direction === "out" && <div className={cn("text-[11px] font-medium opacity-85 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 Business Suite (AI Meta / trả lời ngoài CRM)" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : (m as any).raw?.contact ? <ContactCard c={(m as any).raw.contact} /> : (m as any).raw?.call ? <CallCard call={(m as any).raw.call} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[11px] mt-1 flex items-center gap-1 tabular-nums", m.direction === "out" ? "text-blue-100/90" : "text-slate-500")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && <span className="text-red-100 font-semibold">· chưa gửi được</span>}{m.direction === "out" && m.status === "failed" && <button onClick={() => retry(m)} disabled={sending} className="ml-1 rounded bg-white/90 text-red-700 px-1.5 py-0.5 font-semibold hover:bg-white disabled:opacity-60">Gửi lại</button>}</div>
               {m.status === "failed" && (m as any).raw?.error && <div className="text-[11px] mt-0.5 text-red-100/90 break-words">{String((m as any).raw.error)}</div>}
+              {m.reactions && Object.keys(m.reactions).length > 0 && (() => {
+                // gom theo emoji như Zalo: ❤️ 2 · 👍 1 — rê chuột để xem ai thả
+                const rs = Object.values(m.reactions!); const by = new Map<string, string[]>();
+                for (const r of rs) by.set(r.icon, [...(by.get(r.icon) || []), r.self ? "Mình" : (r.name || convName(byId[m.conversation_id] || conv))]);
+                const tip = Array.from(by.entries()).map(([ic, ns]) => `${ic} ${ns.join(", ")}`).join("\n");
+                return <div title={tip} className={cn("absolute -bottom-3 flex items-center gap-0.5 rounded-full bg-white border border-slate-200 shadow-sm px-1.5 py-[1px] text-[13px] leading-none text-slate-600 select-none", m.direction === "out" ? "left-2" : "right-2")}>
+                  {Array.from(by.keys()).slice(0, 4).map((ic) => <span key={ic}>{ic}</span>)}{rs.length > 1 && <span className="text-[11px] font-medium tabular-nums ml-0.5">{rs.length}</span>}
+                </div>;
+              })()}
             </div>
             {m.direction !== "out" && renderActions(m)}
           </div>

@@ -245,12 +245,21 @@ async function main() {
     try {
       const { data: st } = await sb.from("crm_settings").select("value").eq("key", "zalo_welcome").maybeSingle();
       const cfg = { ...WELCOME_DEFAULT, ...(st?.value || {}) };
-      const text = (t.after_accept_message || (cfg.enabled ? cfg.text : "") || "").replace(/\{fullname\}/g, name || "anh/chị").trim();
+      let raw = t.after_accept_message || (cfg.enabled ? cfg.text : "") || "";
+      // dòng chỉ gồm "/shortcut" (vd /ztonghop) → nội dung tin nhắn nhanh tương ứng (Kho kiến thức)
+      const keys = [...new Set(raw.split("\n").map((l) => l.trim()).filter((l) => /^\/[\w-]+$/.test(l)))];
+      if (keys.length) {
+        const { data: kb } = await sb.from("crm_knowledge").select("shortcut,content").in("shortcut", keys);
+        const map = new Map((kb || []).map((k) => [String(k.shortcut).toLowerCase(), k.content]));
+        raw = raw.split("\n").map((l) => map.get(l.trim().toLowerCase()) ?? l).join("\n");
+      }
+      const text = raw.replace(/\{fullname\}/g, name || "anh/chị").replace(/\{gender\}/g, "anh/chị").trim();
       if (!text) return;
       if (cfg.skip_if_chatted !== false && await hadChat(t.zalo_uid)) { console.log("Bỏ lời chào (đã có hội thoại):", t.zalo_uid); return; }
       await sleep(rnd(3000, 8000)); // không gửi ngay tức thì sau khi khách bấm đồng ý
-      await api.sendMessage(text, t.zalo_uid, ThreadType.User);
+      // ghi vào CRM TRƯỚC rồi mới gửi: listener (selfListen) nhận lại tin này sẽ khớp bản ghi worker-… và chỉ cập nhật mã tin, không ghi đôi
       await recordOutgoing(own, t.zalo_uid, name, text);
+      await api.sendMessage(text, t.zalo_uid, ThreadType.User);
       console.log("Đã gửi lời chào:", t.zalo_uid);
     } catch (e) {
       console.error("sendWelcome", e.message);
@@ -443,7 +452,7 @@ async function main() {
           const since = new Date(Date.now() - 2 * 60000).toISOString();
           const { data: recent } = await sb.from("crm_messages").select("id,status,text,type,external_msg_id").eq("conversation_id", conv.id).eq("direction", "out").gte("created_at", since).order("created_at", { ascending: false }).limit(10);
           const norm = (t) => (t || "").replace(/\s+/g, " ").trim();
-          const dup = (recent || []).find((r) => !r.external_msg_id && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
+          const dup = (recent || []).find((r) => (!r.external_msg_id || String(r.external_msg_id).startsWith("worker-")) && (norm(r.text) === norm(text) || (r.type !== "text" && !text)));
           if (dup) { await sb.from("crm_messages").update({ status: "sent", external_msg_id: String(d.msgId) }).eq("id", dup.id); return; }
         }
       }
@@ -461,6 +470,18 @@ async function main() {
     } catch (e) { console.error("msg err", e.message); }
   });
   // websocket đóng hẳn (zca-js hết lượt thử lại) → thoát để pm2 khởi động lại; lỗi phiên → cần QR
+  // Biểu tượng cảm xúc (tim / like / haha…) khách hoặc mình thả lên tin → crm_messages.reactions
+  const Z_REACT = { "/-heart": "❤️", "/-strong": "👍", ":>": "😆", ":o": "😮", ":-((": "😢", ":-h": "😡", ":-*": "😘", ":')": "😂", "/-shit": "💩", "/-rose": "🌹", "/-break": "💔", "/-weak": "👎", ";xx": "😍", ";-/": "😕", ";-)": "😉", "/-fade": "🥀", "/-li": "☀️", "/-bd": "🎂", "/-bome": "💣", "/-ok": "👌", "/-v": "✌️", "/-thanks": "🙏", "/-punch": "👊", "/-share": "🔗", "_()_": "🙏", "/-no": "🙅", "/-bad": "👎", "/-loveu": "🥰", "--b": "😓", ":((": "😭", "x-)": "😎", "8-)": "🤓", ";-d": "😁", "b-)": "😎", ":--|": "😐", "p-(": "☹️", ":-bye": "👋", "|-)": "😴", ":wipe": "😅", ":-dig": "🤔", "&-(": "😧", ":handclap": "👏", ">-|": "😠", ";-x": "🤐", ":-o": "😲", ";-s": "😳", ";-a": "😨", ":-<": "😞", ":))": "🤣", "$-)": "🤑", "/-beer": "🍺" };
+  api.listener.on("reaction", async (r) => {
+    try {
+      const d = r.data; const c = d.content || {};
+      const ids = (c.rMsg || []).map((x) => x.gMsgID).filter(Boolean).map(String); // gMsgID = msgId đã lưu ở external_msg_id
+      if (!ids.length) return;
+      const icon = c.rIcon ? (Z_REACT[c.rIcon] || c.rIcon) : ""; // rIcon rỗng = gỡ reaction
+      const uid = String(d.uidFrom === "0" || r.isSelf ? own : d.uidFrom);
+      await sb.rpc("crm_set_reaction", { p_msg_ids: ids, p_uid: uid, p_icon: icon, p_name: r.isSelf ? null : (d.dName || null), p_self: !!r.isSelf });
+    } catch (e) { console.error("reaction", e.message); }
+  });
   api.listener.on("closed", async (code, reason) => { console.error("listener closed", code, reason); await setWorker({ last_error: `Listener đóng (${code} ${reason || ""}) — đang khởi động lại` }); await checkSession(api); process.exit(1); });
   api.listener.on("disconnected", (code, reason) => console.log("listener disconnected", code, reason || ""));
   api.listener.on("error", (e) => console.error("listener error", e?.message || e));

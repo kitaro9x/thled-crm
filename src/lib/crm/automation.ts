@@ -13,6 +13,15 @@ export function renderTemplate(tpl: string, ctx: Record<string, unknown>) {
   return s.trim();
 }
 
+/** Dòng nào chỉ gồm "/shortcut" (vd /ztonghop) → thay bằng nội dung tin nhắn nhanh tương ứng (Kho kiến thức) */
+async function expandQuickReplies(db: SupabaseClient, tpl: string) {
+  const keys = Array.from(new Set(tpl.split("\n").map((l) => l.trim()).filter((l) => /^\/[\w-]+$/.test(l))));
+  if (!keys.length) return tpl;
+  const { data } = await db.from("crm_knowledge").select("shortcut,content").in("shortcut", keys);
+  const map = new Map((data || []).map((k: any) => [String(k.shortcut).toLowerCase(), k.content as string]));
+  return tpl.split("\n").map((l) => map.get(l.trim().toLowerCase()) ?? l).join("\n");
+}
+
 function getField(obj: Record<string, any>, field: string) {
   if (field in obj) return obj[field];
   return obj.custom?.[field];
@@ -106,7 +115,7 @@ export async function runAutomation(db: SupabaseClient, leadId: string, events: 
           await db.from("crm_zalo_friend_tasks").insert({
             customer_id: person.id, lead_id: lead.id, rule_id: rule.id, phone: person.phone, source_conversation_id: lead.source_conversation_id,
             greeting: renderTemplate(cfg.greeting || "Xin chào {fullname}, em bên THLED ạ.", ctx).slice(0, 150),
-            after_accept_message: cfg.after_accept_message ? renderTemplate(cfg.after_accept_message, ctx) : null,
+            after_accept_message: cfg.after_accept_message ? renderTemplate(await expandQuickReplies(db, cfg.after_accept_message), ctx) : null,
             notify_old_channel: !!cfg.notify_old_channel, scheduled_at: cfg.send_mode === "schedule" ? cfg.send_at : null,
             context: JSON.stringify({ zalo_uid: cfg.account_mode === "fixed" ? cfg.zalo_uid : owner?.zalo_uid, notify_text: cfg.notify_text }),
           });
