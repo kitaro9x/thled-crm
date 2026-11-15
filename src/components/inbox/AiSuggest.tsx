@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, RefreshCw, ImageIcon, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SafeImg, useElapsed } from "./SafeImg";
 
 export type AiMode = "le" | "thau";
 export interface AiImage { url: string; code: string; price?: string | null }
@@ -27,6 +28,7 @@ export function AiSuggestPanel({ convId, onUse, onClose }: { convId: string; onU
   const [busy, setBusy] = useState(false); const [err, setErr] = useState(""); const [res, setRes] = useState<SuggestRes | null>(null);
   const [hint, setHint] = useState(""); const [mode, setMode] = useState<AiMode | null>(null);
   const reqId = useRef(0);
+  const sec = useElapsed(busy);
   const run = async (h = hint, m = mode) => {
     const id = ++reqId.current; setBusy(true); setErr("");
     try {
@@ -55,7 +57,7 @@ export function AiSuggestPanel({ convId, onUse, onClose }: { convId: string; onU
         <input className="input py-0.5 text-xs flex-1 min-w-[140px] h-6" placeholder="Hướng khác… (Enter)" disabled={busy}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const v = (e.target as HTMLInputElement).value.trim(); setHint(v); run(v); } }} />
       </div>
-      {busy && <div className="text-xs text-slate-500 mt-2 flex items-center gap-1"><Sparkles size={12} className="animate-pulse text-violet-500" /> AI đang đọc hội thoại, tra giá & chính sách… (5–15 giây)</div>}
+      {busy && <div className="text-xs text-slate-500 mt-2 flex items-center gap-1"><Sparkles size={12} className="animate-pulse text-violet-500" /> AI đang đọc hội thoại, tra giá & chính sách… {sec}s</div>}
       {err && <div className="text-xs text-red-600 mt-2">{err}</div>}
       {res && !busy && <div className="mt-2 space-y-1.5">
         {(res.need || res.missing) && <div className="text-[11px] text-slate-500">{res.need && <><b>Khách cần:</b> {res.need}</>}{res.missing && <> · <b>Nên hỏi thêm:</b> {res.missing}</>}</div>}
@@ -64,7 +66,7 @@ export function AiSuggestPanel({ convId, onUse, onClose }: { convId: string; onU
           {res.suggestions.map((s, i) => <div key={i} className="rounded-md border border-slate-200 bg-white p-2 flex flex-col">
             <div className="text-[11px] font-semibold text-violet-600 mb-0.5">{s.style}</div>
             <div className="text-[13px] whitespace-pre-wrap flex-1">{s.text}</div>
-            {s.images.length > 0 && <div className="flex gap-1 mt-1.5 flex-wrap">{s.images.map((im) => <img key={im.url} src={im.url} alt={im.code} title={`${im.code}${im.price ? " · " + im.price : ""}`} className="w-10 h-10 rounded object-cover border border-slate-200" />)}</div>}
+            {s.images.length > 0 && <div className="flex gap-1 mt-1.5 flex-wrap">{s.images.map((im) => <SafeImg key={im.url} src={im.url} alt={im.code} title={`${im.code}${im.price ? " · " + im.price : ""}`} className="w-10 h-10 rounded object-cover border border-slate-200" />)}</div>}
             <div className="flex gap-1 mt-1.5">
               <button className="btn btn-primary px-2 py-0.5 text-xs" style={{ minHeight: 26 }} onClick={() => onUse(s.text, s.images)}>Dùng{s.images.length ? ` + ${s.images.length} ảnh` : ""}</button>
               {s.images.length > 0 && <button className="btn px-2 py-0.5 text-xs" style={{ minHeight: 26 }} title="Chỉ chèn chữ" onClick={() => onUse(s.text, [])}><ImageIcon size={12} className="opacity-40" /> Chỉ chữ</button>}

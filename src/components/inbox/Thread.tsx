@@ -15,7 +15,8 @@ import { CallCard } from "./CallCard";
 import { TaskDialog, TaskList, taskSeedFrom, useOpenTasks, type TaskSeed } from "./Tasks";
 import { Lightbox } from "./Lightbox";
 import { AiSuggestPanel, type AiImage } from "./AiSuggest";
-import { AI_EVENT_ATTACH, AI_EVENT_INSERT } from "@/lib/ai-config";
+import { SafeImg } from "./SafeImg";
+import { AI_EVENT_ATTACH, AI_EVENT_INSERT, imageName } from "@/lib/ai-config";
 
 export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery, aiSuggest }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void; /** admin bật AI + nhân viên không tự ẩn */ aiSuggest?: boolean }) {
   const sb = supabaseBrowser();
@@ -93,7 +94,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
   const [aiOpen, setAiOpen] = useState(false);
   useEffect(() => { setLinked([]); setAiOpen(false); }, [conv.id]);
   const addLinked = (imgs: { url: string; name: string }[]) => setLinked((l) => [...l, ...imgs.filter((x) => !l.some((y) => y.url === x.url))].slice(0, 10));
-  const applyAi = (t: string, imgs: AiImage[]) => { setText(t); addLinked(imgs.map((im) => ({ url: im.url, name: `${im.code}.jpg` }))); setAiOpen(false); setTimeout(() => taRef.current?.focus(), 30); };
+  const applyAi = (t: string, imgs: AiImage[]) => { setText(t); addLinked(imgs.map((im) => ({ url: im.url, name: imageName(im.code, im.url) }))); setAiOpen(false); setTimeout(() => taRef.current?.focus(), 30); };
   // Trợ lý AI (cột phải) → chèn chữ / đính kèm ảnh vào ô soạn tin
   useEffect(() => {
     const onIns = (e: Event) => { const t = (e as CustomEvent<{ text: string }>).detail?.text; if (t) setText((cur) => (cur.trim() ? cur.replace(/\s+$/, "") + "\n" + t : t)); };
@@ -450,7 +451,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           <div className="min-w-0 flex-1"><div className="font-semibold">Trả lời {q.from}</div><div className="truncate text-slate-600">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
           <button onClick={() => setReplyTo(null)} className="p-1 rounded hover:bg-slate-200" title="Bỏ trích dẫn (Esc)"><X size={14} /></button></div>; })()}
         {aiSuggest && aiOpen && <AiSuggestPanel convId={conv.id} onUse={applyAi} onClose={() => setAiOpen(false)} />}
-        {linked.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{linked.map((l) => <div key={l.url} className="relative border rounded-md bg-slate-50 p-1 text-xs" title={l.name}><img src={l.url} alt="" className="h-16 rounded object-cover" /><span className="absolute bottom-1 left-1 lchip lchip-violet">{l.name.replace(/\.jpg$/, "")}</span><button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setLinked((ls) => ls.filter((x) => x.url !== l.url))}><X size={12} /></button></div>)}</div>}
+        {linked.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{linked.map((l) => <div key={l.url} className="relative border rounded-md bg-slate-50 p-1 text-xs" title={l.name}><SafeImg src={l.url} className="h-16 w-16 rounded object-cover" /><span className="absolute bottom-1 left-1 lchip lchip-violet">{l.name.replace(/\.\w+$/, "")}</span><button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setLinked((ls) => ls.filter((x) => x.url !== l.url))}><X size={12} /></button></div>)}</div>}
         {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
         <textarea ref={taRef} className="input resize-none" rows={3} placeholder={isMobile ? "Nhập tin nhắn… (nhấn giữ tin để trích dẫn / chuyển tiếp)" : "Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)"} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onPaste={(e) => { const fs = Array.from(e.clipboardData.files || []); if (fs.length) { e.preventDefault(); addFiles(fs); } }}

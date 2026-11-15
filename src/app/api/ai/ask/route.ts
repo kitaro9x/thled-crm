@@ -30,12 +30,12 @@ export async function POST(req: NextRequest) {
       `Đối tượng khách đang tư vấn: ${mode === "thau" ? "nhà thầu" : "khách lẻ"}.`,
       ctx ? `Ngữ cảnh hội thoại đang mở (tham khảo):\n${wrapTranscript(ctx.lastMessages.join("\n"))}` : "",
       `Câu hỏi: ${question}`,
-      `Tra cứu bằng tool trước khi trả lời về giá / mẫu / chính sách. Gợi ý mẫu thì liệt kê mã trong "products" (server tự lấy giá + ảnh thật).`,
+      `Giá / mẫu / ảnh: tra bằng search_products (gọi song song nếu cần nhiều nhóm). Chính sách đã có trong kho tri thức nạp sẵn thì trả lời luôn; chưa có mới gọi search_brain. Gợi ý mẫu thì liệt kê mã trong "products" (server tự lấy giá + ảnh thật). answer ngắn gọn, tối đa ~8 dòng.`,
     ].filter(Boolean).join("\n\n");
 
     const { out, model } = await runClaude({
       db, settings, feature: "ask", memberId: user.id, conversationId,
-      system: salesSystem(core, settings.shop_notes), prompt, schema: Out, effort: "medium",
+      system: salesSystem(core, settings.shop_notes), prompt, schema: Out, effort: "low", maxIterations: 3,
       tools: lookupTools(db, seen),
     });
     const products = out.products.map((p) => ({ hit: seen.product(p.code), note: p.note })).filter((x) => x.hit).slice(0, 6)
