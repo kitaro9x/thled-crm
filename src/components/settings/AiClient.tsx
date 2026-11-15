@@ -23,6 +23,12 @@ export function AiClient({ initial, brainSync, pages, stats, hasKey, hasSyncSecr
   const r = useRouter();
   const [s, setS] = useState<AiSettings>(initial);
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<{ ok: boolean; t: string } | null>(null);
+  const [test, setTest] = useState<any>(null); const [testing, setTesting] = useState(false);
+  const runTest = async () => {
+    setTesting(true); setTest(null);
+    const res = await fetch("/api/ai/test", { method: "POST" }).catch(() => null);
+    setTest(res ? await res.json().catch(() => ({ ok: false, error: `Lỗi ${res.status}` })) : { ok: false, error: "Mất kết nối" }); setTesting(false);
+  };
   const dirty = JSON.stringify(s) !== JSON.stringify(initial);
   const save = async (next = s) => {
     setBusy(true); setMsg(null);
@@ -45,9 +51,15 @@ export function AiClient({ initial, brainSync, pages, stats, hasKey, hasSyncSecr
           {s.enabled ? <span className="text-emerald-700">Đang BẬT</span> : <span className="text-slate-500">Đang TẮT</span>}
         </label>
       </div>
-      <div className={cn("text-xs rounded-md px-2 py-1.5 flex items-center gap-1.5", hasKey ? "bg-green-50 text-emerald-700" : "bg-amber-50 text-amber-900")}>
+      <div className={cn("text-xs rounded-md px-2 py-1.5 flex items-center gap-1.5 flex-wrap", hasKey ? "bg-green-50 text-emerald-700" : "bg-amber-50 text-amber-900")}>
         <KeyRound size={13} /> {hasKey ? "Đã có ANTHROPIC_API_KEY trên server." : "Chưa có ANTHROPIC_API_KEY — thêm ở Vercel → Settings → Environment Variables rồi Redeploy. Chưa có key thì bật cũng không chạy."}
-      </div>
+      <button className="btn ml-auto px-2 py-0.5 text-xs" style={{ minHeight: 26 }} disabled={testing} onClick={runTest}>{testing ? "Đang kiểm tra…" : "Kiểm tra kết nối Claude"}</button></div>
+      {test && <div className={cn("text-xs rounded-md px-2 py-1.5 space-y-0.5", test.ok ? "bg-green-50 text-emerald-700" : "bg-red-50 text-red-600")}>
+        <div className="font-semibold">{test.ok ? `✓ Kết nối Claude OK — model ${test.model_name || test.model}` : `✗ Chưa kết nối được${test.status ? ` (lỗi ${test.status})` : ""}`}</div>
+        {test.key && <div>Key trên server: <code>{test.key.prefix}…{test.key.last4}</code> · {test.key.length} ký tự{test.key.had_spaces ? " · có dấu cách/xuống dòng thừa (đã tự cắt)" : ""}{test.key.had_quotes ? " · có dấu ngoặc kép thừa (đã tự bỏ)" : ""} — {test.key.hint}</div>}
+        {test.hint && <div>👉 {test.hint}</div>}
+        {test.error && <div className="opacity-80">Anthropic: {test.error}</div>}
+      </div>}
     </div>
 
     <div className="card p-4 space-y-2">

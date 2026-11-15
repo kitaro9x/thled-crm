@@ -13,9 +13,24 @@ import { AI_MODELS, mergeAi, type AiFeature, type AiSettings } from "@/lib/ai-co
 type Db = SupabaseClient;
 export type CustomerMode = "le" | "thau";
 
+/** Key trên Vercel hay bị dán thừa dấu cách / xuống dòng / ngoặc kép → tự làm sạch trước khi dùng. */
+const rawKey = () => process.env.ANTHROPIC_API_KEY || "";
+export const cleanKey = () => rawKey().trim().replace(/^["'`]+|["'`]+$/g, "").trim();
+
+/** Mô tả key để admin đối chiếu (KHÔNG trả nguyên key): loại, độ dài, 4 ký tự cuối, lỗi dán thường gặp. */
+export function keyInfo() {
+  const raw = rawKey(); const k = cleanKey();
+  const kind = !k ? "missing"
+    : k.startsWith("sk-ant-api") ? "api"
+    : k.startsWith("sk-ant-oat") ? "oauth"
+    : k.startsWith("sk-ant-admin") ? "admin"
+    : "unknown";
+  return { present: !!k, kind, prefix: k.slice(0, 12), last4: k.slice(-4), length: k.length, had_spaces: raw !== raw.trim() || /\s/.test(k), had_quotes: /^\s*["'`]|["'`]\s*$/.test(raw) };
+}
+
 let _client: Anthropic | null = null;
 /** Timeout < maxDuration của route (60s) để báo lỗi rõ ràng thay vì bị Vercel cắt ngang. */
-export const anthropic = () => (_client ??= new Anthropic({ timeout: 55_000, maxRetries: 1 }));
+export const anthropic = () => (_client ??= new Anthropic({ apiKey: cleanKey(), timeout: 55_000, maxRetries: 1 }));
 
 export async function getAiSettings(db: Db): Promise<AiSettings> {
   const { data } = await db.from("crm_settings").select("value").eq("key", "ai").maybeSingle();
@@ -34,7 +49,7 @@ export async function aiGuard(feature: AiFeature) {
   const settings = await getAiSettings(db);
   if (!settings.enabled) return { res: NextResponse.json({ error: "Trợ lý AI đang tắt (Cài đặt → Trợ lý AI)" }, { status: 403 }) } as const;
   if (!settings.features[feature]) return { res: NextResponse.json({ error: "Tính năng AI này đang tắt (Cài đặt → Trợ lý AI)" }, { status: 403 }) } as const;
-  if (!process.env.ANTHROPIC_API_KEY) return { res: NextResponse.json({ error: "Chưa cấu hình ANTHROPIC_API_KEY trên Vercel" }, { status: 400 }) } as const;
+  if (!cleanKey()) return { res: NextResponse.json({ error: "Chưa cấu hình ANTHROPIC_API_KEY trên Vercel" }, { status: 400 }) } as const;
   return { user, db, settings } as const;
 }
 
@@ -274,7 +289,7 @@ export async function runClaude<T extends z.ZodType>(o: RunOpts<T>): Promise<{ o
     return { out: r.data, model: usedModel };
   } catch (e: any) {
     const msg = e instanceof AiError ? e.message
-      : e instanceof Anthropic.AuthenticationError ? "ANTHROPIC_API_KEY sai hoặc đã bị thu hồi"
+      : e instanceof Anthropic.AuthenticationError ? "ANTHROPIC_API_KEY sai hoặc đã bị thu hồi — vào Cài đặt → Trợ lý AI → Kiểm tra kết nối"
       : e instanceof Anthropic.RateLimitError ? "Claude đang quá tải / hết hạn mức — thử lại sau ít phút"
       : e instanceof Anthropic.APIConnectionTimeoutError ? "AI phản hồi quá lâu — thử lại"
       : e instanceof Anthropic.APIError ? `Anthropic ${e.status ?? ""}: ${e.message}`
