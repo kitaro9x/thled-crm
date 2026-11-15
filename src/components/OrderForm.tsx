@@ -6,7 +6,7 @@ import { money } from "@/lib/utils";
 type Item = { product_id?: number; name: string; unit_price: number; qty: number; amount: number };
 export function OrderForm({ lead, person, members, conversationId, meId }: { lead: any; person: any; members: { id: string; name: string }[]; conversationId?: string | null; meId?: string | null }) {
   const r = useRouter(); const sb = supabaseBrowser();
-  // lịch hẹn với khách (tạo kèm đơn → hiện ở Hành động, nhắc theo giờ)
+  // lịch hẹn với khách (tạo kèm đơn → hiện ở Công việc, nhắc theo giờ)
   const [apptOn, setApptOn] = useState(!!conversationId); const [apptType, setApptType] = useState<"meeting" | "call" | "follow_up">("meeting");
   const [apptAt, setApptAt] = useState(""); const [apptTitle, setApptTitle] = useState(""); const [apptNote, setApptNote] = useState("");
   const [address, setAddress] = useState(person?.address || "");
@@ -48,7 +48,7 @@ export function OrderForm({ lead, person, members, conversationId, meId }: { lea
           <input type="datetime-local" className="input" value={apptAt} onChange={(e) => setApptAt(e.target.value)} />
           <input className="input" placeholder="Tiêu đề (bỏ trống = tự đặt)" value={apptTitle} onChange={(e) => setApptTitle(e.target.value)} />
           <input className="input md:col-span-3" placeholder="Ghi chú hẹn: khung giờ khách rảnh, cần mang gì…" value={apptNote} onChange={(e) => setApptNote(e.target.value)} />
-          {!apptAt && <div className="text-xs text-amber-700 md:col-span-3">Chọn ngày giờ để tạo lịch hẹn (hiện ở mục Hành động của người phụ trách).</div>}
+          {!apptAt && <div className="text-xs text-amber-700 md:col-span-3">Chọn ngày giờ để tạo lịch hẹn (hiện ở mục Công việc của người phụ trách).</div>}
         </div>}
       </div>
       <div className="relative"><input className="input" placeholder="Tìm sản phẩm trong catalog thled.vn…" value={search} onChange={(e) => setSearch(e.target.value)} />

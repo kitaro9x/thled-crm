@@ -8,7 +8,7 @@ const TYPES = ["call", "meeting", "follow_up", "email"];
 const PRIORITIES = ["low", "medium", "high"];
 
 /**
- * POST /api/activities — tạo công việc (Hành động) từ hội thoại.
+ * POST /api/activities — tạo công việc (mục Công việc) từ hội thoại.
  * { title, type?, description?, attachments?, conversation_id?, person_id?, assignee_id?, due_at?, priority? }
  * Tự gắn cơ hội đang mở của khách (lead_id) → hiện trong Kanban/timeline cơ hội, trigger DB cập nhật next_activity_at.
  * Giao cho người khác → gửi thông báo đẩy tới người đó.

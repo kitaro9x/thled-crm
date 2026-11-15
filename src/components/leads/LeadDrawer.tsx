@@ -45,7 +45,7 @@ export function LeadDrawer({ lead, stages, members, lostReasons, onClose, onPatc
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
             <div className="card p-3"><textarea className="input" rows={2} placeholder="Nhập ghi chú của bạn tại đây" value={note} onChange={(e) => setNote(e.target.value)} /><div className="text-right mt-2"><button className="btn btn-primary" onClick={addNote}>Lưu ghi chú</button></div></div>
             <div className="card p-3">
-              <div className="flex items-center gap-2 text-sm"><b>Hành động</b><span className="text-slate-400">Tạo nhanh:</span>{types.filter((t) => t.k !== "note").map((t) => <button key={t.k} className="text-blue-600 hover:underline" onClick={() => setQuick({ type: t.k, title: t.l, due: "" })}>{t.l}</button>)}</div>
+              <div className="flex items-center gap-2 text-sm"><b>Công việc</b><span className="text-slate-400">Tạo nhanh:</span>{types.filter((t) => t.k !== "note").map((t) => <button key={t.k} className="text-blue-600 hover:underline" onClick={() => setQuick({ type: t.k, title: t.l, due: "" })}>{t.l}</button>)}</div>
               {quick && <div className="mt-2 flex gap-2"><input className="input" value={quick.title} onChange={(e) => setQuick({ ...quick, title: e.target.value })} /><input type="datetime-local" className="input w-52" value={quick.due} onChange={(e) => setQuick({ ...quick, due: e.target.value })} /><button className="btn btn-primary" onClick={addQuick}>Lưu</button><button className="btn" onClick={() => setQuick(null)}>Huỷ</button></div>}
             </div>
             <div className="card p-3">

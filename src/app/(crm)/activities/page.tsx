@@ -1,23 +1,45 @@
-import Link from "next/link";
-import { supabaseServer } from "@/lib/supabase/server";
-import { ActivitiesClient } from "@/components/ActivitiesClient";
+import { redirect } from "next/navigation";
+import { WorkClient } from "@/components/WorkClient";
+import { currentMember, loadWorkItems } from "@/lib/crm/work-items-server";
+import { isOverdue, isToday, workload, type WorkItem } from "@/lib/work-items";
 export const dynamic = "force-dynamic";
-export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const { tab = "todo" } = await searchParams;
-  const sb = await supabaseServer();
-  let q = sb.from("crm_activities").select("*, crm_leads(title), crm_customers(name,phone), crm_members!crm_activities_assignee_id_fkey(name)").neq("type", "note").order("due_at", { ascending: true, nullsFirst: false }).limit(500);
-  const now = new Date().toISOString();
-  if (tab === "todo") q = q.eq("is_done", false);
-  if (["call", "meeting", "follow_up", "email"].includes(tab)) q = q.eq("is_done", false).eq("type", tab);
-  if (tab === "overdue") q = q.eq("is_done", false).lt("due_at", now);
-  if (tab === "today") q = q.eq("is_done", false).gte("due_at", now.slice(0, 10)).lt("due_at", new Date(Date.now() + 86400000).toISOString().slice(0, 10));
-  if (tab === "done") q = q.eq("is_done", true);
-  const { data } = await q;
-  const tabs = [["todo", "Chưa hoàn thành"], ["call", "Gọi"], ["meeting", "Họp"], ["follow_up", "Bám đuổi"], ["email", "Email"], ["overdue", "Quá hạn"], ["today", "Hôm nay"], ["done", "Đã xong"]];
+
+/**
+ * Mục "Công việc" (trước đây "Hành động"): gộp việc CRM (crm_activities) + việc trang thled.vn/congviec (tasks)
+ * để cả nhóm thấy khối lượng việc & lịch trình của từng người.
+ * ?tab=todo|today|overdue|web|crm|call|meeting|follow_up|email|done  ?p=<member id>|me
+ */
+export default async function Page({ searchParams }: { searchParams: Promise<{ tab?: string; p?: string }> }) {
+  const { tab = "todo", p = "" } = await searchParams;
+  const me = await currentMember();
+  if (!me) redirect("/login");
+  const done = tab === "done";
+  const open = await loadWorkItems(me, { done: false });
+  const base = done ? await loadWorkItems(me, { done: true }) : open;
+
+  const now = new Date();
+  const person = p === "me" ? me.id : p;
+  const byTab = (w: WorkItem) => {
+    if (tab === "today") return isToday(w, now);
+    if (tab === "overdue") return isOverdue(w, now);
+    if (tab === "web") return w.src === "web";
+    if (tab === "crm") return w.src === "crm";
+    if (["call", "meeting", "follow_up", "email"].includes(tab)) return w.kind === tab;
+    return true;
+  };
+  const items = base.items.filter((w) => byTab(w) && (!person || w.ownerId === person));
+
   return (
-    <div className="h-full flex flex-col">
-      <div className="px-4 py-2 bg-white border-b border-slate-200 flex gap-2 items-center"><b className="mr-2">Hành động</b>{tabs.map(([k, l]) => <Link key={k} href={`/activities?tab=${k}`} className={`chip border ${tab === k ? "bg-blue-600 text-white border-blue-600" : "border-slate-200"}`}>{l}</Link>)}</div>
-      <ActivitiesClient items={(data as any[]) || []} />
-    </div>
+    <WorkClient
+      key={tab + "|" + person}
+      tab={tab}
+      person={person}
+      me={{ id: me.id, name: me.name }}
+      items={items}
+      load={workload(open.items, now)}
+      members={open.members.filter((m) => m.email).map((m) => ({ id: m.id, name: m.name, email: m.email! }))}
+      lists={open.lists}
+      error={base.error}
+    />
   );
 }
