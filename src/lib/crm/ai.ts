@@ -121,8 +121,8 @@ export class Seen {
 
 const specsText = (s: Record<string, any> | null) => s ? Object.entries(s).filter(([, v]) => v !== null && v !== "" && typeof v !== "object").map(([k, v]) => `${k}: ${v}`).join("; ").slice(0, 600) : "";
 
-export async function searchProducts(db: Db, a: { q: string; line?: string | null; min_price?: number | null; max_price?: number | null; limit?: number }): Promise<ProductHit[]> {
-  const { data, error } = await db.rpc("crm_ai_search_products", { q: a.q || "", p_line: a.line || null, p_min: a.min_price ?? null, p_max: a.max_price ?? null, p_limit: a.limit ?? 8 });
+export async function searchProducts(db: Db, a: { q: string; line?: string | null; min_price?: number | null; max_price?: number | null; co_den?: boolean | null; limit?: number }): Promise<ProductHit[]> {
+  const { data, error } = await db.rpc("crm_ai_search_products_v2", { q: a.q || "", p_line: a.line || null, p_min: a.min_price ?? null, p_max: a.max_price ?? null, p_limit: a.limit ?? 8, p_co_den: a.co_den ?? null });
   if (error) throw new Error("search_products: " + error.message);
   return (data || []) as ProductHit[];
 }
@@ -165,6 +165,7 @@ export function lookupTools(db: Db, seen: Seen) {
         line: z.enum(["vach", "tha", "op-tran", "am-tran", "den-chum", "vat-tu-led", "cong-tac", "quat-tran", "quat-panasonic", "nlmt"]).optional().describe("Lọc theo dòng sản phẩm"),
         min_price: z.number().optional().describe("Giá thấp nhất (VND)"),
         max_price: z.number().optional().describe("Giá cao nhất (VND)"),
+        co_den: z.boolean().optional().describe("CHỈ khi tìm quạt trần: true = quạt có đèn, false = quạt không đèn (đừng đưa chữ 'đèn' vào q)"),
       }),
       run: async (a) => {
         const hits = await searchProducts(db, { ...a, limit: 8 });
@@ -244,6 +245,8 @@ interface RunOpts<T extends z.ZodType> {
   tools?: ReturnType<typeof lookupTools>;
   /** số lượt gọi API tối đa trong vòng tool (mỗi lượt ~3–8 giây) */
   maxIterations?: number;
+  /** các lượt hỏi đáp trước (khung chat Trợ lý AI) — gửi thành tin user/assistant trước câu hỏi mới */
+  history?: { q: string; a: string }[];
 }
 
 const firstJson = (text: string) => { const a = text.indexOf("{"), b = text.lastIndexOf("}"); return a >= 0 && b > a ? text.slice(a, b + 1) : text; };
@@ -269,7 +272,10 @@ export async function runClaude<T extends z.ZodType>(o: RunOpts<T>): Promise<{ o
     ...(o.tools?.length ? { cache_control: { type: "ephemeral" as const } } : {}),
     max_tokens: o.maxTokens ?? 12000,
     system: o.system,
-    messages: [{ role: "user" as const, content: o.prompt }],
+    messages: [
+      ...(o.history || []).flatMap((h) => [{ role: "user" as const, content: h.q }, { role: "assistant" as const, content: h.a }]),
+      { role: "user" as const, content: o.prompt },
+    ],
     output_config: { effort: o.effort, format: betaZodOutputFormat(o.schema) },
     // Bị bộ lọc an toàn từ chối → API tự chạy lại bằng model dự phòng (Opus/Sonnet 5.5). Haiku 5.5 không hỗ trợ.
     ...(modelInfo.fallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
