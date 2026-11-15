@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 const groups = [
-  { t: "HUB", items: [["/settings/channels", "Kết nối kênh"], ["/settings/labels", "Nhãn hội thoại"], ["/settings/bots", "Bot trả lời bình luận"], ["/settings/distribution?tab=conversation", "Phân phối hội thoại"], ["/settings/other?tab=conversation", "Cài đặt hội thoại"]] },
+  { t: "HUB", items: [["/settings/channels", "Kết nối kênh"], ["/settings/labels", "Nhãn hội thoại"], ["/settings/bots", "Bot trả lời bình luận"], ["/settings/distribution?tab=conversation", "Phân phối hội thoại"], ["/settings/other?tab=conversation", "Cài đặt hội thoại"], ["/settings/ai", "Trợ lý AI (Claude)"]] },
   { t: "CRM", items: [["/settings/sources", "Nguồn khách hàng"], ["/settings/pipelines", "Cài đặt phễu bán"], ["/settings/automation", "Luồng tự động hoá"], ["/settings/sequences", "Kịch bản nuôi"], ["/settings/distribution?tab=lead", "Phân phối cơ hội"], ["/settings/distribution?tab=user", "Ca làm việc"]] },
   { t: "CẤU HÌNH", items: [["/settings/members", "Nhân sự & Quyền"], ["/settings/other?tab=phone", "Số điện thoại"], ["/settings/other?tab=lost", "Lý do thất bại"], ["/settings/other?tab=emotions", "Cảm xúc khách hàng"], ["/settings/other?tab=company", "Thông tin công ty"]] },
 ];

@@ -31,7 +31,8 @@ Copy `.env.example` → `.env.local` (local) và vào Vercel → Settings → En
 | `FB_APP_ID`, `FB_APP_SECRET` | developers.facebook.com → app của THLED |
 | `FB_VERIFY_TOKEN` | tự đặt, dùng khi đăng ký webhook |
 | `CRON_SECRET` | tự đặt; Vercel tự gửi header này cho cron |
-| `ANTHROPIC_API_KEY` | tuỳ chọn: AI tóm tắt / cảm xúc |
+| `ANTHROPIC_API_KEY` | tuỳ chọn: Trợ lý AI (Claude) — xem mục 9 |
+| `BRAIN_SYNC_SECRET` | tuỳ chọn: chuỗi bí mật ≥16 ký tự để repo THLED-Brain đẩy tri thức sang (mục 9) |
 | `APP_URL` | (worker) URL app đã deploy, vd https://crm.thled.vn |
 
 ## 4. Deploy lên Vercel
@@ -92,10 +93,25 @@ worker/zalo.mjs
 supabase/migrations/20261023_crm_core.sql
 ```
 
-## 9. Chưa làm / roadmap
+## 9. Trợ lý AI (Claude) + THLED-Brain
+
+Bật/tắt ở **Cài đặt → Trợ lý AI (Claude)** (chỉ admin; mặc định TẮT). Mỗi nhân viên tự ẩn AI cho mình bằng ô *Trợ lý AI cho tôi* đầu danh sách hội thoại (localStorage). Tắt ở Cài đặt → server trả 403 cho mọi `/api/ai/*`.
+
+| Tính năng | Ở đâu | API |
+|---|---|---|
+| Gợi ý trả lời (3 phương án, kèm ảnh SP) | nút **Gợi ý AI** trong ô soạn tin — chỉ chèn, không tự gửi | `POST /api/ai/suggest` |
+| Tra giá / ảnh / chính sách | khung *Trợ lý AI* cột phải → *Ảnh* / *Chèn* vào ô soạn | `POST /api/ai/ask` |
+| Tóm tắt hội thoại | nút *AI tóm tắt* cột phải | `POST /api/ai/summarize` |
+
+- Model mặc định `claude-opus-5-5` (đổi Sonnet/Haiku 5.5 trong Cài đặt), SDK `@anthropic-ai/sdk`, structured output + tool chỉ-đọc (`search_products` → RPC `crm_ai_search_products` trên `landing_items` + `landing_fans`; `search_brain`; `search_quick_replies`). Giá/ảnh trên thẻ lấy từ DB, AI không tự viết. Mỗi lần gọi ghi `crm_ai_logs` (token → chi phí ước tính trong Cài đặt).
+- Khách **thầu**: hội thoại có nhãn chứa “Thầu” → AI áp chính sách thầu (nhân viên đổi tay Lẻ/Thầu được).
+- **THLED-Brain** (repo `kitaro9x/thled-brain`): GitHub Action `dong-bo-crm.yml` gửi **chỉ vùng chung** `01-noi-bo-chung/` sang `POST /api/internal/brain-sync` (header `x-brain-secret`). Server kiểm lần 2 (`src/lib/crm/brain.ts`: path, `vung: chung`, từ vùng riêng) rồi thay toàn bộ `crm_brain_pages` / `crm_brain_chunks`. Trang “luôn nạp” (cam kết dịch vụ, sổ tay văn hoá, chính sách thầu) vào system prompt có cache 1 giờ.
+- Migration: `supabase/migrations/20261115_ai_assistant.sql`.
+
+## 10. Chưa làm / roadmap
 
 - Zalo OA, Website chat widget, Email inbox
-- Chatbot AI tự trả lời (bảng `crm_chatbots` đã có, chưa có runtime)
+- Chatbot AI **tự** trả lời khách (bảng `crm_chatbots` đã có, chưa có runtime — hiện AI chỉ gợi ý, nhân viên gửi)
 - Chấm điểm lead tự động (bảng `crm_scoring_rules` + UI có; chưa có job tính điểm)
 - Báo cáo tuỳ chỉnh, xuất Excel báo cáo
 - Kéo thả thứ tự giai đoạn, bulk edit lead, mobile layout

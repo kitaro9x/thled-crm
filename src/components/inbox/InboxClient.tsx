@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone } from "lucide-react";
+import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone, Sparkles } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -11,6 +11,7 @@ import { labelTone } from "@/lib/label-tone";
 import { Thread } from "./Thread";
 import { PersonPanel } from "./PersonPanel";
 import { MediaGallery } from "./MediaGallery";
+import { AI_HIDDEN_KEY, type AiPublic } from "@/lib/ai-config";
 
 type QuickFilter = "open" | "closed" | "all" | "unread" | "unanswered" | "important" | "overdue" | "hidden";
 const quick: { k: QuickFilter; l: string }[] = [
@@ -19,7 +20,12 @@ const quick: { k: QuickFilter; l: string }[] = [
   { k: "hidden", l: "Đã xoá/chặn" },
 ];
 
-export function InboxClient({ initial, labels, members, channels, knowledge }: { initial: Conversation[]; labels: Label[]; members: Pick<Member, "id" | "name" | "avatar_url" | "role" | "is_online">[]; channels: Channel[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[] }) {
+export function InboxClient({ initial, labels, members, channels, knowledge, ai }: { initial: Conversation[]; labels: Label[]; members: Pick<Member, "id" | "name" | "avatar_url" | "role" | "is_online">[]; channels: Channel[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; ai?: AiPublic }) {
+  // Trợ lý AI: admin bật trong Cài đặt; từng nhân viên tự ẩn cho mình (chỉ lưu trên trình duyệt này)
+  const [aiHidden, setAiHidden] = useState(false);
+  useEffect(() => { try { setAiHidden(localStorage.getItem(AI_HIDDEN_KEY) === "1"); } catch {} }, []);
+  const toggleAiHidden = () => setAiHidden((v) => { try { localStorage.setItem(AI_HIDDEN_KEY, v ? "0" : "1"); } catch {} return !v; });
+  const aiOn = !!ai?.enabled && !aiHidden;
   const [convs, setConvs] = useState<Conversation[]>(initial);
   // hội thoại đã xoá/chặn (is_hidden) chỉ tải khi mở bộ lọc "Đã xoá/chặn"
   const [hiddenConvs, setHiddenConvs] = useState<Conversation[] | null>(null);
@@ -178,6 +184,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
             <button className={cn("btn px-2", showFilter && "bg-blue-50 border-blue-300")} onClick={() => setShowFilter((v) => !v)}><Filter size={14} /></button>
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
+          {ai?.enabled && <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Ẩn/hiện nút Gợi ý AI, Trợ lý AI và Tóm tắt AI cho riêng bạn (lưu trên trình duyệt này). Admin bật/tắt cho cả shop ở Cài đặt → Trợ lý AI."><input type="checkbox" checked={!aiHidden} onChange={toggleAiHidden} /> <Sparkles size={12} className="text-violet-500" /> Trợ lý AI cho tôi</label>}
           <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}<button onClick={toggleCustOnly} title="Chỉ hiện khách hàng: hội thoại chưa gắn nhãn hoặc nhãn khách. Ẩn Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick 'Không tạo cơ hội' trong Cài đặt → Nhãn). Kết hợp được với các chip khác." className={cn("fchip", custOnly && "on", custOnly && "ring-1 ring-emerald-400")}>{custOnly ? "✓ " : ""}Khách hàng</button></div>
           {stages.length > 0 && <div className="flex gap-1.5 flex-wrap" title="Lọc theo giai đoạn cơ hội của khách — bấm lần nữa để bỏ lọc">
             {stages.map((st) => <button key={st.id} onClick={() => setStageF((v) => (v === st.id ? null : st.id))} className={cn("fchip", stageF === st.id && "on")} style={stageF === st.id ? { background: st.color, borderColor: st.color, color: "#fff" } : { borderColor: st.color }}>{stageLabel(st.name)} <span className="opacity-70 tabular-nums">{stageCount[st.id] ?? 0}</span></button>)}
@@ -217,14 +224,14 @@ export function InboxClient({ initial, labels, members, channels, knowledge }: {
         {current ? <div className="relative flex-1 min-h-0 flex flex-col">
           {/* bọc div: .btn (CSS ngoài layer) ghi đè "hidden" của Tailwind → trên điện thoại nút này từng đè lên nút ⋯ */}
           <div className="hidden md:block absolute top-3 right-3 z-10"><button className="btn px-2" title={showPanel ? "Ẩn hồ sơ khách (chat rộng hơn)" : "Hiện hồ sơ khách"} onClick={togglePanel}>{showPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button></div>
-          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} galleryOpen={side === "gallery"} onOpenGallery={toggleGallery} />
+          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} galleryOpen={side === "gallery"} onOpenGallery={toggleGallery} aiSuggest={aiOn && !!ai?.features.suggest} />
         </div> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
       </div>
       {/* cột 3: panel khách */}
       {current && <div className={cn("min-h-0 flex-col", mobileView === "panel" ? "flex w-full" : showPanel || side === "gallery" ? "hidden md:flex" : "hidden")}>
         {side === "gallery" ? <MediaGallery ids={siblings.map((c) => c.id)} onClose={closeGallery} onJump={jumpToMessage} /> : <>
           <div className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-white border-b border-slate-200 text-sm"><button className="btn px-2" onClick={() => setMobileView("thread")}><ArrowLeft size={16} /></button><div className="font-semibold">Hồ sơ khách</div></div>
-          <PersonPanel key={"p" + current.id} conv={current} members={members} leadBlockedBy={blockingLabel(siblings)} />
+          <PersonPanel key={"p" + current.id} conv={current} members={members} leadBlockedBy={blockingLabel(siblings)} aiSummary={aiOn && !!ai?.features.summary} aiLookup={aiOn && !!ai?.features.lookup} />
         </>}
       </div>}
     </div>

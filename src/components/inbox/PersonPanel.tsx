@@ -11,9 +11,10 @@ import { money, dt, cn } from "@/lib/utils";
 import { CustomerName, OldNames } from "@/components/CustomerName";
 import { oldNames } from "@/lib/customer-name";
 import { TaskDialog, TaskList, useOpenTasks } from "./Tasks";
+import { AiAssistant } from "./AiAssistant";
 
 /** leadBlockedBy: tên nhãn "Không tạo cơ hội" (Nhà cung cấp, Bạn bè, Gia đình, Shipper, Công nợ…) mà hội thoại đang mang → ẩn mục Cơ hội */
-export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Conversation; members: { id: string; name: string }[]; leadBlockedBy?: string | null }) {
+export function PersonPanel({ conv, members, leadBlockedBy = null, aiSummary = false, aiLookup = false }: { conv: Conversation; members: { id: string; name: string }[]; leadBlockedBy?: string | null; /** Trợ lý AI: admin bật + nhân viên không tự ẩn */ aiSummary?: boolean; aiLookup?: boolean }) {
   const showLeads = !leadBlockedBy;
   const sb = supabaseBrowser();
   const [person, setPerson] = useState<Person | null>(null);
@@ -176,6 +177,22 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
     setAi(j); load();
   };
 
+  // Trợ lý AI: tra giá/ảnh/chính sách + tóm tắt hội thoại (ẩn khi admin tắt hoặc nhân viên tự ẩn)
+  const aiBox = (aiSummary || aiLookup) ? (
+    <div className="pt-2 border-t border-slate-100 space-y-2">
+      {aiLookup && <AiAssistant convId={conv.id} />}
+      {aiSummary && <>
+        <button className="btn w-full justify-center" onClick={summarize} disabled={aiBusy}><Sparkles size={14} /> {aiBusy ? "AI đang đọc hội thoại…" : ai?.summary ? "AI tóm tắt lại" : "AI tóm tắt hội thoại"}</button>
+        {ai?.error && <div className="text-xs text-red-600 mt-1">{ai.error}</div>}
+      </>}
+      {ai?.summary && <div className="rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-slate-700 whitespace-pre-wrap">
+        <div className="flex items-center gap-1 font-semibold text-violet-700 mb-1"><Sparkles size={12} /> Tóm tắt AI{ai.stage && <span className="chip bg-violet-100 text-violet-700 ml-auto">{ai.stage}</span>}</div>
+        {ai.summary}
+        {ai.product_interest && <div className="mt-1 text-slate-500">Quan tâm: {ai.product_interest}</div>}
+      </div>}
+    </div>
+  ) : null;
+
   return (
     <div className="w-full md:w-[320px] shrink-0 md:border-l border-slate-200 bg-white overflow-y-auto flex-1 min-h-0">
       <div className="p-4 border-b border-slate-100 flex items-center gap-3">
@@ -188,6 +205,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           <input className="input" placeholder="Tên" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="input" placeholder="Số điện thoại" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <button className="btn btn-primary w-full justify-center" onClick={createPerson} disabled={busy}><Plus size={14} /> Tạo khách hàng</button>
+          {aiLookup && <div className="pt-2 border-t border-slate-100"><AiAssistant convId={conv.id} /></div>}
           {taskBox}
           {friendBox}
           {dangerBox}
@@ -204,6 +222,8 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
           <Row k="SP quan tâm"><input className="input py-1" defaultValue={(person.custom?.sp_quan_tam as string) || ""} onBlur={async (e) => { await sb.from("crm_customers").update({ custom: { ...person.custom, sp_quan_tam: e.target.value } }).eq("id", person.id); }} /></Row>
           {(person.emotion || conv.emotion) && <Row k="Cảm xúc">{person.emotion || conv.emotion}</Row>}
           <Row k="Nguồn">{({ automation: "Tự động từ hội thoại", manual: "Tạo tay", import: "Nhập file", web: "Website" } as Record<string, string>)[person.source_origin || ""] || person.source_origin || "—"}</Row>
+
+          {aiBox}
 
           {taskBox}
 
@@ -223,14 +243,7 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
             {orders.map((o) => <Link key={o.id} href={`/orders/${o.id}`} className="flex justify-between text-xs py-1"><span>{o.code}</span><span>{money(o.grand_total)}</span></Link>)}
           </div>
 
-          <button className="btn w-full justify-center" onClick={summarize} disabled={aiBusy}><Sparkles size={14} /> {aiBusy ? "AI đang đọc hội thoại…" : ai?.summary ? "AI tóm tắt lại" : "AI tóm tắt hội thoại"}</button>
-          {ai?.error && <div className="text-xs text-red-600 mt-1">{ai.error}</div>}
           {dangerBox}
-          {ai?.summary && <div className="mt-2 rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-slate-700 whitespace-pre-wrap">
-            <div className="flex items-center gap-1 font-semibold text-violet-700 mb-1"><Sparkles size={12} /> Tóm tắt AI{ai.stage && <span className="chip bg-violet-100 text-violet-700 ml-auto">{ai.stage}</span>}</div>
-            {ai.summary}
-            {ai.product_interest && <div className="mt-1 text-slate-500">Quan tâm: {ai.product_interest}</div>}
-          </div>}
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus, Sparkles } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -14,8 +14,10 @@ import { ContactCard } from "./ContactCard";
 import { CallCard } from "./CallCard";
 import { TaskDialog, TaskList, taskSeedFrom, useOpenTasks, type TaskSeed } from "./Tasks";
 import { Lightbox } from "./Lightbox";
+import { AiSuggestPanel, type AiImage } from "./AiSuggest";
+import { AI_EVENT_ATTACH, AI_EVENT_INSERT } from "@/lib/ai-config";
 
-export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void }) {
+export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery, aiSuggest }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void; /** admin bật AI + nhân viên không tự ẩn */ aiSuggest?: boolean }) {
   const sb = supabaseBrowser();
   const all = siblings && siblings.length ? siblings : [conv];
   const ids = all.map((c) => c.id);
@@ -86,6 +88,19 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
   const [convLabels, setConvLabels] = useState<string[]>(conv.labels || []);
   const [err, setErr] = useState<string | null>(null);
   const [files, setFiles] = useState<{ file: File; preview: string }[]>([]);
+  // ảnh đã có URL sẵn (ảnh sản phẩm do AI gợi ý / Trợ lý AI) → gửi thẳng, không tải lên lại
+  const [linked, setLinked] = useState<{ url: string; name: string }[]>([]);
+  const [aiOpen, setAiOpen] = useState(false);
+  useEffect(() => { setLinked([]); setAiOpen(false); }, [conv.id]);
+  const addLinked = (imgs: { url: string; name: string }[]) => setLinked((l) => [...l, ...imgs.filter((x) => !l.some((y) => y.url === x.url))].slice(0, 10));
+  const applyAi = (t: string, imgs: AiImage[]) => { setText(t); addLinked(imgs.map((im) => ({ url: im.url, name: `${im.code}.jpg` }))); setAiOpen(false); setTimeout(() => taRef.current?.focus(), 30); };
+  // Trợ lý AI (cột phải) → chèn chữ / đính kèm ảnh vào ô soạn tin
+  useEffect(() => {
+    const onIns = (e: Event) => { const t = (e as CustomEvent<{ text: string }>).detail?.text; if (t) setText((cur) => (cur.trim() ? cur.replace(/\s+$/, "") + "\n" + t : t)); };
+    const onAtt = (e: Event) => { const d = (e as CustomEvent<{ url: string; name?: string }>).detail; if (d?.url) addLinked([{ url: d.url, name: d.name || "anh.jpg" }]); };
+    window.addEventListener(AI_EVENT_INSERT, onIns); window.addEventListener(AI_EVENT_ATTACH, onAtt);
+    return () => { window.removeEventListener(AI_EVENT_INSERT, onIns); window.removeEventListener(AI_EVENT_ATTACH, onAtt); };
+  }, []);
   const [showQuick, setShowQuick] = useState(false); const [quickQ, setQuickQ] = useState("");
   const quickRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
@@ -221,11 +236,11 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
   }, [conv.id]);
 
   const send = async () => {
-    if (!text.trim() && !files.length) return; setSending(true); setErr(null);
+    if (!text.trim() && !files.length && !linked.length) return; setSending(true); setErr(null);
     let attachments: { type: string; url: string; name: string }[] = [];
-    try { setUploading(true); attachments = await uploadAll(); } catch (e: any) { setErr(e.message); setSending(false); setUploading(false); return; } finally { setUploading(false); }
+    try { setUploading(true); attachments = [...linked.map((l) => ({ type: "image", url: l.url, name: l.name })), ...(await uploadAll())]; } catch (e: any) { setErr(e.message); setSending(false); setUploading(false); return; } finally { setUploading(false); }
     const body = text.trim(); const sched = schedule; const rt = replyTo;
-    setText(""); setSchedule(""); setFiles([]); setReplyTo(null);
+    setText(""); setSchedule(""); setFiles([]); setLinked([]); setReplyTo(null);
     await post({ conversation_id: target.id, text: body || undefined, attachments, scheduled_at: sched || undefined, reply_to: rt?.id || undefined, quote: rt ? quoteOf(rt) : null });
   };
   /** Gọi API gửi; hiện tin ngay (optimistic), server xác nhận sau; lỗi → bong bóng "lỗi" kèm lý do + nút Gửi lại */
@@ -434,6 +449,8 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           <Reply size={14} className="text-blue-600 shrink-0" />{q.thumb && <img src={q.thumb} alt="" className="w-8 h-8 rounded object-cover" />}
           <div className="min-w-0 flex-1"><div className="font-semibold">Trả lời {q.from}</div><div className="truncate text-slate-600">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
           <button onClick={() => setReplyTo(null)} className="p-1 rounded hover:bg-slate-200" title="Bỏ trích dẫn (Esc)"><X size={14} /></button></div>; })()}
+        {aiSuggest && aiOpen && <AiSuggestPanel convId={conv.id} onUse={applyAi} onClose={() => setAiOpen(false)} />}
+        {linked.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{linked.map((l) => <div key={l.url} className="relative border rounded-md bg-slate-50 p-1 text-xs" title={l.name}><img src={l.url} alt="" className="h-16 rounded object-cover" /><span className="absolute bottom-1 left-1 lchip lchip-violet">{l.name.replace(/\.jpg$/, "")}</span><button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setLinked((ls) => ls.filter((x) => x.url !== l.url))}><X size={12} /></button></div>)}</div>}
         {files.length > 0 && <div className="flex gap-2 flex-wrap mb-2">{files.map((f, i) => <div key={i} className="relative border rounded-md bg-slate-50 p-1 text-xs max-w-[120px]">{f.preview ? <img src={f.preview} alt="" className="h-16 rounded object-cover" /> : <div className="h-16 flex items-center px-1 truncate">{f.file.name}</div>}<button className="absolute -top-2 -right-2 bg-white border rounded-full p-0.5" onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X size={12} /></button></div>)}</div>}
         <textarea ref={taRef} className="input resize-none" rows={3} placeholder={isMobile ? "Nhập tin nhắn… (nhấn giữ tin để trích dẫn / chuyển tiếp)" : "Nhập tin nhắn… (Enter gửi, Shift+Enter xuống dòng, gõ /phím_tắt để chèn trả lời nhanh, dán ảnh Ctrl+V)"} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
           onPaste={(e) => { const fs = Array.from(e.clipboardData.files || []); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
@@ -453,8 +470,9 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
             </div>}
           </div>
           <button className="tbtn" title="Đính kèm ảnh / video / PDF (hoặc dán Ctrl+V, kéo thả)" onClick={() => fileRef.current?.click()}><Paperclip size={15} /><span className="hidden lg:inline">Đính kèm</span></button>
+          {aiSuggest && <button className={cn("tbtn", aiOpen && "active")} title="AI đọc hội thoại + THLED-Brain, soạn 3 phương án trả lời (không tự gửi)" onClick={() => setAiOpen((v) => !v)}><Sparkles size={15} className="text-violet-500" /><span className="hidden lg:inline">Gợi ý AI</span></button>}
           {/* hẹn giờ gửi: ẩn theo yêu cầu (hay bấm nhầm); logic gửi theo lịch vẫn giữ nguyên */}
-          <button className={cn("ml-auto inline-flex items-center gap-1.5 rounded-md px-4 text-sm font-semibold transition-colors duration-150 active:scale-[0.97] h-9", (text.trim() || files.length) && !sending ? "bg-blue-600 hover:bg-blue-700 text-white shadow-sm cursor-pointer" : "bg-slate-200 text-slate-500 cursor-not-allowed dark-send-off")} onClick={send} disabled={sending || (!text.trim() && !files.length)} title="Gửi (Enter)"><Send size={15} /> {uploading ? "Đang tải lên…" : sending ? "Đang gửi…" : schedule ? "Hẹn gửi" : "Gửi"}</button>
+          <button className={cn("ml-auto inline-flex items-center gap-1.5 rounded-md px-4 text-sm font-semibold transition-colors duration-150 active:scale-[0.97] h-9", (text.trim() || files.length || linked.length) && !sending ? "bg-blue-600 hover:bg-blue-700 text-white shadow-sm cursor-pointer" : "bg-slate-200 text-slate-500 cursor-not-allowed dark-send-off")} onClick={send} disabled={sending || (!text.trim() && !files.length && !linked.length)} title="Gửi (Enter)"><Send size={15} /> {uploading ? "Đang tải lên…" : sending ? "Đang gửi…" : schedule ? "Hẹn gửi" : "Gửi"}</button>
         </div>
       </div>
     </>

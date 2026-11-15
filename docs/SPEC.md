@@ -54,5 +54,5 @@ members · channels · labels · customers(person, +custom jsonb) · identities 
 ## 6. Rủi ro & quyết định
 - Zalo cá nhân qua `zca-js` (không chính thức) → có thể bị khoá; giới hạn 15 kết bạn/ngày, 1 tài khoản, chạy trên VPS riêng. Phương án an toàn: Zalo OA (chưa làm).
 - Messenger sau 24h phải dùng message tag; cần App Review để lên production.
-- AI (tóm tắt/cảm xúc) tuỳ chọn, cần ANTHROPIC_API_KEY; prompt cảm xúc lấy nguyên từ SO9, lưu ở crm_emotions.
+- AI (Claude) tuỳ chọn, cần ANTHROPIC_API_KEY, bật/tắt ở Cài đặt → Trợ lý AI: tóm tắt/cảm xúc (prompt cảm xúc lấy từ SO9, crm_emotions), gợi ý trả lời, tra giá/ảnh/chính sách. Tri thức từ THLED-Brain — chỉ vùng chung, đẩy bằng GitHub Action (README mục 9).
 - Chưa làm: Zalo OA, chat widget, email, chatbot AI runtime, báo cáo tuỳ chỉnh, lịch hành động, mobile.
