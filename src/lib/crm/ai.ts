@@ -285,8 +285,14 @@ export async function runClaude<T extends z.ZodType>(o: RunOpts<T>): Promise<{ o
     const params = { ...base, ...(fast ? { speed: "fast" as const } : {}) };
     let last: Anthropic.Beta.Messages.BetaMessage | null = null;
     if (o.tools?.length) {
-      const runner = anthropic().beta.messages.toolRunner({ ...params, tools: o.tools, max_iterations: o.maxIterations ?? 3, thread: false });
-      for await (const m of runner) { add(m); last = m; }
+      const max = Math.max(2, o.maxIterations ?? 3);
+      const runner = anthropic().beta.messages.toolRunner({ ...params, tools: o.tools, max_iterations: max, thread: false });
+      let n = 0;
+      for await (const m of runner) {
+        add(m); last = m; n++;
+        // lượt cuối: cấm gọi tool → AI phải trả lời bằng những gì đã tra được (tránh lỗi "tra quá nhiều bước")
+        if (n === max - 1 && m.stop_reason === "tool_use") runner.setMessagesParams((p) => ({ ...p, tool_choice: { type: "none" } }));
+      }
     } else {
       last = await anthropic().beta.messages.create(params);
       add(last);
