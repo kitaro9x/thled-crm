@@ -8,6 +8,8 @@ export interface AiSettings {
   brain_pinned: string[];
   /** Ghi chú thêm cho AI: giờ mở cửa, phí giao, khuyến mãi đang chạy… */
   shop_notes: string;
+  /** Chế độ nhanh (fast mode) — chỉ Opus 5.5: sinh chữ nhanh ~2,5×, giá ×2 */
+  fast: boolean;
 }
 /** Bản gọn gửi xuống trình duyệt (inbox) */
 export interface AiPublic { enabled: boolean; features: Record<AiFeature, boolean> }
@@ -22,13 +24,14 @@ export const AI_DEFAULTS: AiSettings = {
     "01-noi-bo-chung/tu-van-khach/chinh-sach-khach-thau.md",
   ],
   shop_notes: "",
+  fast: false,
 };
 
 /** Giá USD / 1 triệu token (bảng giá Anthropic 11/2026). cacheWrite tính cho TTL 1 giờ (= 2× input). */
 export const AI_MODELS = [
-  { id: "claude-opus-5-5", name: "Claude Opus 5.5", hint: "Tư vấn tốt nhất — mặc định", in: 4, out: 20, cacheRead: 0.2, fallback: true },
-  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", hint: "Nhanh hơn, ~½ giá Opus", in: 2, out: 10, cacheRead: 0.1, fallback: true },
-  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", hint: "Rẻ nhất, viết kém tinh tế hơn", in: 0.1, out: 0.5, cacheRead: 0.01, fallback: false },
+  { id: "claude-opus-5-5", name: "Claude Opus 5.5", hint: "Tư vấn tốt nhất — mặc định", in: 4, out: 20, cacheRead: 0.2, fallback: true, fast: true },
+  { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", hint: "Nhanh hơn, ~½ giá Opus", in: 2, out: 10, cacheRead: 0.1, fallback: true, fast: false },
+  { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", hint: "Rẻ & nhanh nhất, viết kém tinh tế hơn", in: 0.1, out: 0.5, cacheRead: 0.01, fallback: false, fast: false },
 ] as const;
 export const USD_VND = 26000;
 
@@ -40,16 +43,21 @@ export function mergeAi(v: unknown): AiSettings {
     features: { ...AI_DEFAULTS.features, ...(o.features || {}) },
     brain_pinned: Array.isArray(o.brain_pinned) ? o.brain_pinned.filter((x) => typeof x === "string") : AI_DEFAULTS.brain_pinned,
     shop_notes: typeof o.shop_notes === "string" ? o.shop_notes : "",
+    fast: !!o.fast,
   };
 }
 
 export const aiPublic = (s: AiSettings): AiPublic => ({ enabled: s.enabled, features: s.features });
 
-/** Chi phí ước tính (USD) của 1 dòng log */
-export function aiCostUsd(model: string | null | undefined, u: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }) {
+/** Chi phí ước tính (USD) của 1 dòng log. Chế độ nhanh (speed = fast) tính ×2. */
+export function aiCostUsd(model: string | null | undefined, u: { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; speed?: string | null }) {
   const m = AI_MODELS.find((x) => x.id === model) || AI_MODELS[0];
-  return (u.input_tokens * m.in + u.output_tokens * m.out + u.cache_read_tokens * m.cacheRead + u.cache_write_tokens * m.in * 2) / 1e6;
+  const x = u.speed === "fast" ? 2 : 1;
+  return x * (u.input_tokens * m.in + u.output_tokens * m.out + u.cache_read_tokens * m.cacheRead + u.cache_write_tokens * m.in * 2) / 1e6;
 }
+
+/** Tên file đính kèm theo đúng đuôi ảnh (Zalo nhận jpg/png/webp là ảnh) */
+export const imageName = (code: string, url: string) => `${code.replace(/[^\p{L}\p{N}-]+/gu, "_")}.${(url.split("?")[0].split(".").pop() || "jpg").toLowerCase().slice(0, 5)}`;
 
 /** Window events giữa Trợ lý AI (cột phải) và ô soạn tin (Thread) */
 export const AI_EVENT_INSERT = "crm:ai-insert"; // detail: { text: string }

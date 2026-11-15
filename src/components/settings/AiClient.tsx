@@ -80,6 +80,10 @@ export function AiClient({ initial, brainSync, pages, stats, hasKey, hasSyncSecr
           <div className="text-xs mt-1">≈ {vnd(perSuggest(m))} / lần gợi ý</div>
         </label>)}
       </div>
+      <label className={cn("flex gap-2 items-start rounded-md border p-2", s.model === "claude-opus-5-5" ? "border-slate-200" : "border-slate-100 opacity-50")}>
+        <input type="checkbox" className="mt-0.5" disabled={s.model !== "claude-opus-5-5"} checked={s.fast && s.model === "claude-opus-5-5"} onChange={(e) => setS({ ...s, fast: e.target.checked })} />
+        <span><span className="font-medium">⚡ Chế độ nhanh (fast mode)</span><span className="block text-xs text-slate-500">Chỉ Opus 5.5: AI viết nhanh hơn ~2,5 lần (gợi ý thường còn ~5–7 giây), <b>giá ×2</b> (≈ {vnd(perSuggest(AI_MODELS[0]) * 2)} / lần gợi ý). Hết hạn mức chế độ nhanh thì tự chạy tốc độ thường.</span></span>
+      </label>
       <p className="text-xs text-slate-500">Ước tính theo giá Anthropic (USD × {USD_VND.toLocaleString("vi-VN")}), thực tế tuỳ độ dài hội thoại. Opus/Sonnet 5.5 bật sẵn “model dự phòng” khi bị bộ lọc an toàn từ chối.</p>
     </div>
 

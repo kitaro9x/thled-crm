@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
 
     const { out, model } = await runClaude({
       db, settings, feature: "suggest", memberId: user.id, conversationId,
-      system: salesSystem(core, settings.shop_notes), prompt, schema: Out, effort: "low",
+      system: salesSystem(core, settings.shop_notes), prompt, schema: Out, effort: "low", maxIterations: 3,
       tools: lookupTools(db, seen),
     });
 
