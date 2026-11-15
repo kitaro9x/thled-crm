@@ -11,6 +11,7 @@
     "worker:jobs": "node worker/jobs.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.4",
     "@types/pdfkit": "^0.17.7",
