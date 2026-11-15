@@ -7,8 +7,8 @@ import type { Activity, Attachment, Conversation, Message } from "@/lib/types";
 import { cn, dt, convName } from "@/lib/utils";
 
 /**
- * Công việc tạo từ hội thoại = bản ghi crm_activities (mục "Hành động").
- * Một nguồn duy nhất: hiện ở trang Hành động (lọc Hôm nay / Quá hạn), timeline cơ hội, panel khách và thanh trên khung chat.
+ * Công việc tạo từ hội thoại = bản ghi crm_activities (mục "Công việc").
+ * Một nguồn duy nhất: hiện ở trang Công việc (lọc Hôm nay / Quá hạn), timeline cơ hội, panel khách và thanh trên khung chat.
  */
 export const TASK_TYPES = [
   { k: "follow_up", l: "Bám đuổi" },
@@ -112,7 +112,7 @@ export function TaskDialog({ conv, members, seed, onClose }: { conv: Conversatio
         {err && <div className="text-xs text-red-600">{err}</div>}
       </div>
       <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-200 shrink-0">
-        <span className="text-[11px] text-slate-500 hidden sm:block">Lưu vào <b>Hành động</b>, gắn với khách & cơ hội đang mở</span>
+        <span className="text-[11px] text-slate-500 hidden sm:block">Lưu vào <b>Công việc</b>, gắn với khách & cơ hội đang mở</span>
         <button className="btn ml-auto" onClick={() => onClose()}>Huỷ</button>
         <button className="btn btn-primary" onClick={save} disabled={busy} title="Ctrl+Enter">{busy ? "Đang lưu…" : "Tạo công việc"}</button>
       </div>
@@ -170,5 +170,5 @@ export function TaskList({ tasks, members, onDone, onImage }: { tasks: Activity[
           : <a key={i} href={x.url} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 underline">📎 {x.name || x.type}</a>)}</div>}
       </div>}
     </div>;
-  })}<Link href="/activities" className="block text-[11px] text-blue-600 pt-0.5">Xem tất cả trong Hành động →</Link></div>;
+  })}<Link href="/activities" className="block text-[11px] text-blue-600 pt-0.5">Xem tất cả trong Công việc →</Link></div>;
 }

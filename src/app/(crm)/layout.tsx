@@ -10,7 +10,7 @@ import { PushToggle } from "@/components/PushToggle";
 const nav = [
   { href: "/inbox", label: "Hội thoại", icon: MessageSquare },
   { href: "/leads", label: "Cơ hội", icon: Target },
-  { href: "/activities", label: "Hành động", icon: CheckSquare },
+  { href: "/activities", label: "Công việc", icon: CheckSquare },
   { href: "/cdp", label: "CDP", icon: Users },
   { href: "/knowledge", label: "Tri thức", icon: BookOpen },
   { href: "/orders", label: "Đơn hàng", icon: ShoppingCart },

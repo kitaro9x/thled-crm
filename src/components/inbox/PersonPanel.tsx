@@ -116,12 +116,12 @@ export function PersonPanel({ conv, members, leadBlockedBy = null }: { conv: Con
     setIdent((i) => ({ ...(i || {}), meta: { ...(i?.meta || {}), blocked: false } })); load();
   };
   const blocked = !!ident?.meta?.blocked;
-  // Công việc đang mở (lưu ở mục Hành động) của khách / hội thoại
+  // Công việc đang mở (lưu ở mục Công việc) của khách / hội thoại
   const { tasks, markDone } = useOpenTasks(conv);
   const [newTask, setNewTask] = useState(false);
   const taskBox = (
     <div className="pt-2 border-t border-slate-100">
-      <div className="flex items-center justify-between mb-1"><b className="flex items-center gap-1"><ClipboardList size={14} />Công việc ({tasks.length})</b><button className="btn px-2 py-0.5" title="Tạo công việc (lưu vào Hành động)" onClick={() => setNewTask(true)}><Plus size={12} /></button></div>
+      <div className="flex items-center justify-between mb-1"><b className="flex items-center gap-1"><ClipboardList size={14} />Công việc ({tasks.length})</b><button className="btn px-2 py-0.5" title="Tạo công việc (lưu vào Công việc)" onClick={() => setNewTask(true)}><Plus size={12} /></button></div>
       <TaskList tasks={tasks} members={members} onDone={markDone} />
       {newTask && <TaskDialog conv={conv} members={members} seed={{}} onClose={() => setNewTask(false)} />}
     </div>
