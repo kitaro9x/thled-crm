@@ -28,6 +28,7 @@ export type WorkItem = {
   customerBusy?: boolean;
   // chỉ có ở việc /congviec
   gmailLink?: string | null;
+  origin?: "web" | "gmail" | "gcal" | "journal"; // tasks.source: gcal = nhập từ Google Calendar
 };
 
 export const TZ = "Asia/Ho_Chi_Minh";

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Plus, ExternalLink, Mail, X, AlertTriangle } from "lucide-react";
+import { MessageSquare, Plus, ExternalLink, Mail, X, AlertTriangle, CalendarSync, RefreshCw } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { fmtVN, groupBySchedule, isOverdue, vnDay, type WorkItem, type workload } from "@/lib/work-items";
@@ -22,10 +22,17 @@ export function WorkClient({ tab, person, me, items, load, members, lists, error
   const router = useRouter();
   const [list, setList] = useState(items);
   const [adding, setAdding] = useState(false);
+  const [gcalOpen, setGcalOpen] = useState(false);
   const [err, setErr] = useState<string | null>(error);
   useEffect(() => setList(items), [items]);
   // quay lại tab/cửa sổ → tải lại để thấy việc mới thêm trên /congviec
   useEffect(() => { const f = () => router.refresh(); window.addEventListener("focus", f); return () => window.removeEventListener("focus", f); }, [router]);
+  // mở trang → kéo lịch Google mới nhất (cả nhóm, lịch nào cũ hơn 1 phút); có thay đổi thì tải lại danh sách
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/gcal/sync", { method: "POST" }).then((r) => r.json()).then((r) => { if (alive && r?.changed > 0) router.refresh(); }).catch(() => {});
+    return () => { alive = false; };
+  }, [router]);
 
   const href = (t: string, p: string) => { const q = new URLSearchParams(); if (t !== "todo") q.set("tab", t); if (p) q.set("p", p); const s = q.toString(); return "/activities" + (s ? "?" + s : ""); };
 
@@ -61,6 +68,7 @@ export function WorkClient({ tab, person, me, items, load, members, lists, error
             {members.map((m) => <option key={m.id} value={m.id}>{m.id === me.id ? `${m.name} (tôi)` : m.name}</option>)}
           </select>
           <span className="hidden sm:inline"><a href={CONGVIEC_URL} target="_blank" rel="noreferrer" className="btn whitespace-nowrap" title="Mở trang công việc trên website">/congviec<ExternalLink size={13} /></a></span>
+          <button className="btn whitespace-nowrap" onClick={() => setGcalOpen(true)} title="Đồng bộ Google Calendar về Công việc"><CalendarSync size={15} /><span className="hidden sm:inline">Lịch Google</span></button>
           <button className="btn btn-primary whitespace-nowrap" onClick={() => setAdding(true)}><Plus size={15} />Thêm việc</button>
         </div>
       </div>
@@ -102,6 +110,8 @@ export function WorkClient({ tab, person, me, items, load, members, lists, error
         {tab === "done" && doneSorted.length > 0 && <div className="card divide-y divide-slate-100">{doneSorted.map((w) => <Row key={w.key} w={w} onToggle={toggle} showDone />)}</div>}
       </div>
 
+      {/* chỉ danh sách của chính mình trên /congviec (server cũng chỉ nhận danh sách của mình) */}
+      {gcalOpen && <GcalDialog lists={lists.filter((l) => l.owner_email.toLowerCase() === members.find((m) => m.id === me.id)?.email.toLowerCase())} onClose={(changed) => { setGcalOpen(false); if (changed) router.refresh(); }} />}
       {adding && <AddDialog me={me} person={person} members={members} lists={lists} onClose={(ok) => { setAdding(false); if (ok) router.refresh(); }} />}
     </div>
   );
@@ -141,6 +151,7 @@ function Row({ w, onToggle, showDone }: { w: WorkItem; onToggle: (w: WorkItem) =
 
 /** Nhãn nguồn: loại việc CRM (Gọi/Họp/Bám đuổi…) hoặc danh sách trên /congviec (chấm màu) */
 function Tag({ w }: { w: WorkItem }) {
+  if (w.origin === "gcal") return <span className="chip bg-slate-100 sm:w-28 justify-center shrink-0 gap-1 max-w-[9rem]" title={`Từ Google Calendar${w.list ? " · " + w.list.name : ""}`}><CalendarSync size={11} className="shrink-0" style={{ color: w.list?.color || "#4285f4" }} /><span className="truncate">{w.list?.name || "Lịch Google"}</span></span>;
   if (w.src === "crm") return <span className="chip bg-slate-100 sm:w-28 justify-center shrink-0" title="Việc tạo trong CRM">{kindLabel[w.kind] || w.kind}</span>;
   return <span className="chip bg-slate-100 sm:w-28 justify-center shrink-0 gap-1 max-w-[9rem]" title={`Việc trên /congviec${w.list ? " · " + w.list.name : ""}`}><span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: w.list?.color || "#94a3b8" }} /><span className="truncate">{w.list?.name || "/congviec"}</span></span>;
 }
@@ -183,6 +194,83 @@ function AddDialog({ me, person, members, lists, onClose }: { me: { id: string; 
         <textarea className="input" rows={2} placeholder="Ghi chú" value={notes} onChange={(e) => setNotes(e.target.value)} />
         {err && <div className="text-red-600 text-xs">{err}</div>}
         <div className="flex justify-end gap-2"><button className="btn" onClick={() => onClose()}>Huỷ</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? "Đang lưu…" : "Lưu"}</button></div>
+      </div>
+    </div>
+  );
+}
+
+type GcalState = { mine: { url: string; list_id: string | null; last_synced_at: string | null; last_error: string | null; last_count: number | null } | null; team: { member_id: string; name: string; last_synced_at: string | null; ok: boolean }[] };
+
+/** Kết nối Google Calendar của tôi bằng "Địa chỉ bí mật ở định dạng iCal" (một chiều Google → Công việc) */
+function GcalDialog({ lists, onClose }: { lists: ListLite[]; onClose: (changed?: boolean) => void }) {
+  const [st, setSt] = useState<GcalState | null>(null);
+  const [url, setUrl] = useState("");
+  const [listId, setListId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [changed, setChanged] = useState(false);
+  const load = () => fetch("/api/gcal").then((r) => r.json()).then((d: GcalState) => { setSt(d); setListId(d.mine?.list_id || ""); }).catch(() => setMsg({ ok: false, text: "Không tải được trạng thái" }));
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    const r = await fetch("/api/gcal", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: url.trim() || undefined, list_id: listId || null }) });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) { setMsg({ ok: false, text: d.error || "Lỗi lưu" }); return; }
+    setMsg({ ok: true, text: `Đã đồng bộ ${d.events} sự kiện · thêm ${d.created}, cập nhật ${d.updated}, ẩn ${d.removed}` });
+    setUrl(""); setChanged(true); load();
+  };
+  const disconnect = async () => {
+    if (!confirm("Ngắt kết nối lịch Google? Các việc chưa làm (từ hôm nay) đã nhập từ lịch sẽ được ẩn.")) return;
+    setBusy(true); await fetch("/api/gcal", { method: "DELETE" }); setBusy(false); setChanged(true); setMsg({ ok: true, text: "Đã ngắt kết nối" }); load();
+  };
+  const ago = (iso: string | null) => (iso ? fmtVN(iso) : "chưa");
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center p-4" onClick={() => onClose(changed)}>
+      <div className="card w-full max-w-lg p-4 space-y-3 text-sm max-h-[90dvh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2"><CalendarSync size={16} className="text-blue-600" /><b>Đồng bộ Google Calendar</b><button className="ml-auto" onClick={() => onClose(changed)} aria-label="Đóng"><X size={16} /></button></div>
+        <p className="text-slate-600">Sự kiện anh/chị thêm trên Google Calendar sẽ tự vào mục Công việc (và /congviec), cập nhật mỗi 5 phút. Chiều ngược lại (việc tạo trên /congviec → Google) vẫn do /congviec lo như cũ.</p>
+
+        {st?.mine ? (
+          <div className={cn("rounded-md border p-2.5 space-y-0.5", st.mine.last_error ? "border-red-300 bg-red-50" : "border-slate-200 bg-slate-50")}>
+            <div><b>Đã kết nối</b> <span className="text-slate-500 break-all">{st.mine.url}</span></div>
+            <div className="text-xs text-slate-500">Lần đồng bộ: {ago(st.mine.last_synced_at)}{st.mine.last_count != null && ` · ${st.mine.last_count} sự kiện trong khung`}</div>
+            {st.mine.last_error && <div className="text-xs text-red-600">Lỗi: {st.mine.last_error}</div>}
+          </div>
+        ) : st && <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5 text-amber-900">Chưa kết nối lịch của bạn.</div>}
+
+        <details open={!st?.mine} className="rounded-md border border-slate-200 p-2.5">
+          <summary className="cursor-pointer font-medium">Cách lấy link lịch (làm trên máy tính, 1 lần)</summary>
+          <ol className="list-decimal pl-5 mt-2 space-y-1 text-slate-600">
+            <li>Mở <a className="text-blue-600 hover:underline" href="https://calendar.google.com/calendar/r/settings" target="_blank" rel="noreferrer">Google Calendar → Cài đặt</a>.</li>
+            <li>Cột trái, mục <b>Cài đặt cho lịch của tôi</b> → bấm tên lịch (thường là email của bạn).</li>
+            <li>Kéo xuống <b>Tích hợp lịch</b> → copy ô <b>Địa chỉ bí mật ở định dạng iCal</b> (có chữ <code>private-</code>, đuôi <code>.ics</code>).</li>
+            <li>Dán vào ô bên dưới → <b>Lưu & đồng bộ</b>.</li>
+          </ol>
+          <p className="text-xs text-slate-500 mt-2">Link này như mật khẩu xem lịch: chỉ dán vào đây, không gửi qua Zalo/chat. Lỡ lộ thì bấm “Đặt lại” ngay dưới ô đó trên Google để tạo link mới.</p>
+        </details>
+
+        <input className="input" placeholder={st?.mine ? "Dán link mới nếu muốn đổi lịch (để trống = giữ link cũ)" : "https://calendar.google.com/calendar/ical/…/private-…/basic.ics"} value={url} onChange={(e) => setUrl(e.target.value)} />
+        <label className="block space-y-1"><span className="text-xs text-slate-500">Đưa việc từ lịch vào danh sách (trên /congviec)</span>
+          <select className="input" value={listId} onChange={(e) => setListId(e.target.value)}>
+            <option value="">— Không (cả nhóm đều thấy) —</option>
+            {lists.map((l) => <option key={l.id} value={l.id}>{l.name}{/^cá nhân$/i.test(l.name.trim()) ? " (chỉ mình tôi thấy)" : ""}</option>)}
+          </select></label>
+        <p className="text-xs text-slate-500">Sự kiện lẻ: lấy 60 ngày tới, quá giờ chưa tick → Quá hạn. Sự kiện lặp lại (họp tuần…): lấy 14 ngày tới, buổi đã qua tự ẩn.</p>
+        {msg && <div className={cn("text-xs", msg.ok ? "text-emerald-700" : "text-red-600")}>{msg.text}</div>}
+        <div className="flex items-center gap-2">
+          {st?.mine && <button className="btn" disabled={busy} onClick={disconnect}>Ngắt kết nối</button>}
+          <button className="btn btn-primary ml-auto" disabled={busy || (!url.trim() && !st?.mine)} onClick={save}>{busy ? <><RefreshCw size={14} className="animate-spin" />Đang đồng bộ…</> : st?.mine && !url.trim() ? "Lưu & đồng bộ lại" : "Lưu & đồng bộ"}</button>
+        </div>
+
+        {st && st.team.length > 0 && (
+          <div className="border-t border-slate-200 pt-2">
+            <div className="text-xs text-slate-500 mb-1">Đã kết nối lịch trong nhóm</div>
+            {st.team.map((t) => <div key={t.member_id} className="flex justify-between text-xs py-0.5"><span>{t.name}</span><span className={t.ok ? "text-slate-500" : "text-red-600"}>{t.ok ? "đồng bộ " + ago(t.last_synced_at) : "lỗi đồng bộ"}</span></div>)}
+          </div>
+        )}
       </div>
     </div>
   );
