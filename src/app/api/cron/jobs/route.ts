@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fbSendMessage } from "@/lib/crm/facebook";
 import { renderTemplate, runAutomation } from "@/lib/crm/automation";
+import { syncDueFeeds } from "@/lib/crm/gcal-sync";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -12,12 +13,13 @@ export const maxDuration = 60;
  * 2. Chạy kịch bản nuôi (sequence enrollments)
  * 3. Trigger theo lịch (scheduled)
  * 4. Đánh dấu online/offline nhân sự
+ * 5. Đồng bộ Google Calendar → Công việc (mỗi lịch 5 phút/lần)
  */
 export async function GET(req: NextRequest) {
   if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) return new NextResponse("forbidden", { status: 403 });
   const db = supabaseAdmin();
   const now = new Date().toISOString();
-  const report: Record<string, number> = { outbox: 0, sequences: 0, scheduled_rules: 0 };
+  const report: Record<string, number> = { outbox: 0, sequences: 0, scheduled_rules: 0, gcal_synced: 0 };
 
   // 1. outbox (fb only — zalo worker tự lấy)
   const { data: outbox } = await db.from("crm_outbox").select("*, crm_channels(type,credentials)").eq("status", "queued").or(`scheduled_at.is.null,scheduled_at.lte.${now}`).limit(50);
@@ -72,6 +74,9 @@ export async function GET(req: NextRequest) {
 
   // 4. offline sau 5 phút không heartbeat
   await db.from("crm_members").update({ is_online: false }).lt("last_seen_at", new Date(Date.now() - 5 * 60000).toISOString()).eq("is_online", true);
+
+  // 5. Google Calendar → Công việc (lỗi từng lịch đã ghi vào crm_gcal_feeds.last_error, không làm hỏng cron)
+  try { report.gcal_synced = (await syncDueFeeds(db, 5 * 60_000)).synced; } catch (e) { console.error("gcal sync", e); }
 
   return NextResponse.json({ ok: true, ...report });
 }

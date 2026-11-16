@@ -41,7 +41,7 @@ export async function loadWorkItems(me: Member, opts: { done: boolean }) {
 
   let cq = sb.from("crm_activities").select("*, crm_leads(title), crm_customers(name,phone), crm_members!crm_activities_assignee_id_fkey(name)").neq("type", "note").eq("is_done", opts.done).limit(opts.done ? 200 : 500);
   cq = opts.done ? cq.order("done_at", { ascending: false, nullsFirst: false }) : cq.order("due_at", { ascending: true, nullsFirst: false });
-  let wq = admin.from("tasks").select("id,owner_email,list_id,title,notes,status,priority,due_date,due_time,completed_at,gmail_link").is("deleted_at", null).is("parent_id", null).limit(opts.done ? 200 : 500);
+  let wq = admin.from("tasks").select("id,owner_email,list_id,title,notes,status,priority,due_date,due_time,completed_at,gmail_link,source").is("deleted_at", null).is("parent_id", null).limit(opts.done ? 200 : 500);
   wq = opts.done ? wq.eq("status", "done").order("completed_at", { ascending: false, nullsFirst: false }) : wq.neq("status", "done");
   const [{ data: acts, error: e1 }, { data: tasks, error: e2 }] = await Promise.all([cq, wq]);
 
@@ -66,7 +66,7 @@ export async function loadWorkItems(me: Member, opts: { done: boolean }) {
       status: t.status === "done" ? "done" : t.status === "doing" ? "doing" : "todo", doneAt: t.completed_at || null,
       dueAt: webDue(t.due_date, t.due_time), allDay: !!t.due_date && !t.due_time,
       ownerId: owner?.id || null, ownerName: owner?.name || String(t.owner_email || "").split("@")[0] || "?",
-      priority: webPrio(t.priority), list: list ? { name: list.name, color: list.color } : null, gmailLink: t.gmail_link || null,
+      priority: webPrio(t.priority), list: list ? { name: list.name, color: list.color } : null, gmailLink: t.gmail_link || null, origin: t.source,
     });
   }
   // lists chỉ trả về loại công khai (để chọn khi thêm việc), danh sách riêng chỉ của mình
