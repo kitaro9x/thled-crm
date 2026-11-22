@@ -236,8 +236,9 @@ export function salesSystem(core: string, shopNotes: string, lessonRules = ""): 
 // ───────────────────────── Gọi Claude ─────────────────────────
 
 interface RunOpts<T extends z.ZodType> {
-  db: Db; settings: AiSettings; feature: "summary" | "suggest" | "ask" | "lesson";
-  memberId: string; conversationId?: string | null;
+  db: Db; settings: AiSettings; feature: "summary" | "suggest" | "ask" | "lesson" | "away";
+  /** null = hệ thống tự chạy (AI trực thay), không có người bấm */
+  memberId: string | null; conversationId?: string | null;
   system: string | Anthropic.Beta.Messages.BetaTextBlockParam[];
   prompt: string;
   schema: T;
@@ -248,6 +249,8 @@ interface RunOpts<T extends z.ZodType> {
   maxIterations?: number;
   /** các lượt hỏi đáp trước (khung chat Trợ lý AI) — gửi thành tin user/assistant trước câu hỏi mới */
   history?: { q: string; a: string }[];
+  /** Chạy nền (AI trực thay): luôn tốc độ thường, mỗi lượt gọi tối đa `callTimeoutMs`, không tự thử lại, dừng hẳn khi `signal` huỷ */
+  background?: { callTimeoutMs: number; signal: AbortSignal };
 }
 
 const firstJson = (text: string) => { const a = text.indexOf("{"), b = text.lastIndexOf("}"); return a >= 0 && b > a ? text.slice(a, b + 1) : text; };
@@ -266,7 +269,9 @@ export async function runClaude<T extends z.ZodType>(o: RunOpts<T>): Promise<{ o
   const log = (ok: boolean, error?: string) => o.db.from("crm_ai_logs").insert({ member_id: o.memberId, conversation_id: o.conversationId || null, feature: o.feature, model: usedModel, speed, ...usage, iterations, ms: Date.now() - started, ok, error: error?.slice(0, 500) || null }).then(() => {}, () => {});
 
   // Chế độ nhanh: chỉ Opus 5.5, admin bật trong Cài đặt (giá ×2). Hết hạn mức fast → tự chạy lại tốc độ thường.
-  const wantFast = o.settings.fast && modelInfo.fast;
+  const wantFast = o.settings.fast && modelInfo.fast && !o.background;
+  const client = o.background ? anthropic().withOptions({ timeout: o.background.callTimeoutMs, maxRetries: 0 }) : anthropic();
+  const reqOpts = o.background ? { signal: o.background.signal } : undefined;
   const base = {
     model: modelInfo.id,
     // nhiều lượt tool: cache cả phần hội thoại đã gửi → lượt sau đọc cache, rẻ và nhanh hơn
@@ -287,7 +292,7 @@ export async function runClaude<T extends z.ZodType>(o: RunOpts<T>): Promise<{ o
     let last: Anthropic.Beta.Messages.BetaMessage | null = null;
     if (o.tools?.length) {
       const max = Math.max(2, o.maxIterations ?? 3);
-      const runner = anthropic().beta.messages.toolRunner({ ...params, tools: o.tools, max_iterations: max, thread: false });
+      const runner = client.beta.messages.toolRunner({ ...params, tools: o.tools, max_iterations: max, thread: false }, reqOpts);
       let n = 0;
       for await (const m of runner) {
         add(m); last = m; n++;
@@ -295,7 +300,7 @@ export async function runClaude<T extends z.ZodType>(o: RunOpts<T>): Promise<{ o
         if (n === max - 1 && m.stop_reason === "tool_use") runner.setMessagesParams((p) => ({ ...p, tool_choice: { type: "none" } }));
       }
     } else {
-      last = await anthropic().beta.messages.create(params);
+      last = await client.beta.messages.create(params, reqOpts);
       add(last);
     }
     return last;

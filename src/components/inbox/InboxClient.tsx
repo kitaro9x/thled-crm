@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone, Sparkles } from "lucide-react";
+import { Search, Filter, Users, ArrowLeft, UserRound, PanelRightClose, PanelRightOpen, MessageSquare, Phone, Sparkles, Moon } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Channel, Conversation, Label, Member } from "@/lib/types";
 import { Avatar } from "@/components/Avatar";
@@ -20,12 +20,24 @@ const quick: { k: QuickFilter; l: string }[] = [
   { k: "hidden", l: "Đã xoá/chặn" },
 ];
 
-export function InboxClient({ initial, labels, members, channels, knowledge, ai }: { initial: Conversation[]; labels: Label[]; members: Pick<Member, "id" | "name" | "avatar_url" | "role" | "is_online">[]; channels: Channel[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; ai?: AiPublic }) {
+export function InboxClient({ initial, labels, members, channels, knowledge, ai, isAdmin }: { initial: Conversation[]; labels: Label[]; members: Pick<Member, "id" | "name" | "avatar_url" | "role" | "is_online">[]; channels: Channel[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; ai?: AiPublic; isAdmin?: boolean }) {
   // Trợ lý AI: admin bật trong Cài đặt; từng nhân viên tự ẩn cho mình (chỉ lưu trên trình duyệt này)
   const [aiHidden, setAiHidden] = useState(false);
   useEffect(() => { try { setAiHidden(localStorage.getItem(AI_HIDDEN_KEY) === "1"); } catch {} }, []);
   const toggleAiHidden = () => setAiHidden((v) => { try { localStorage.setItem(AI_HIDDEN_KEY, v ? "0" : "1"); } catch {} return !v; });
   const aiOn = !!ai?.enabled && !aiHidden;
+  // AI trực thay khi nghỉ — công tắc nhanh cho admin (cài đặt chi tiết + nhật ký ở Cài đặt → Trợ lý AI)
+  const [away, setAway] = useState<{ active: boolean; on: boolean; mode: "shadow" | "live" }>(ai?.away || { active: false, on: false, mode: "shadow" });
+  const [awayBusy, setAwayBusy] = useState(false);
+  const toggleAway = async () => {
+    const next = !away.on;
+    if (next && away.mode === "live" && !window.confirm("Bật AI trực thay ở chế độ GỬI THẬT?\nAI sẽ tự nhắn cho khách (Messenger + Zalo đã rõ là khách) tới khi anh tắt.")) return;
+    setAwayBusy(true);
+    const r = await fetch("/api/ai/away", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: next, until: null }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    setAwayBusy(false);
+    if (r?.ok) setAway({ active: !!j.active, on: !!j.away?.on, mode: j.away?.mode === "live" ? "live" : "shadow" });
+  };
   const [convs, setConvs] = useState<Conversation[]>(initial);
   // hội thoại đã xoá/chặn (is_hidden) chỉ tải khi mở bộ lọc "Đã xoá/chặn"
   const [hiddenConvs, setHiddenConvs] = useState<Conversation[] | null>(null);
@@ -185,6 +197,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge, ai 
           </div>
           <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật: khách nhắn kèm SĐT → tự tạo khách + cơ hội + kết bạn Zalo. Tắt: chỉ tạo tay bằng nút 'Tạo khách hàng'."><input type="checkbox" checked={!!autoCreate} onChange={toggleAuto} disabled={autoCreate === null} /> Tự tạo khách & cơ hội khi có SĐT</label>
           {ai?.enabled && <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Ẩn/hiện nút Gợi ý AI, Trợ lý AI và Tóm tắt AI cho riêng bạn (lưu trên trình duyệt này). Admin bật/tắt cho cả shop ở Cài đặt → Trợ lý AI."><input type="checkbox" checked={!aiHidden} onChange={toggleAiHidden} /> <Sparkles size={12} className="text-violet-500" /> Trợ lý AI cho tôi</label>}
+          {ai?.enabled && isAdmin && <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Bật khi anh nghỉ: AI tự trả lời khách trong phạm vi an toàn (tư vấn mẫu, giá niêm yết, bảo hành, showroom); việc khác thì giữ khách và báo anh. Chi tiết + nhật ký: Cài đặt → Trợ lý AI."><input type="checkbox" checked={away.on} disabled={awayBusy} onChange={toggleAway} /> <Moon size={12} className="text-indigo-500" /> AI trực thay khi tôi nghỉ{away.active && <span className={cn("lchip", away.mode === "live" ? "lchip-green" : "lchip-amber")}>{away.mode === "live" ? "đang trực · gửi thật" : "đang trực · chạy thử"}</span>}<a href="/settings/ai#away" className="text-blue-600 ml-auto" onClick={(e) => e.stopPropagation()}>cài đặt</a></label>}
           <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}<button onClick={toggleCustOnly} title="Chỉ hiện khách hàng: hội thoại chưa gắn nhãn hoặc nhãn khách. Ẩn Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick 'Không tạo cơ hội' trong Cài đặt → Nhãn). Kết hợp được với các chip khác." className={cn("fchip", custOnly && "on", custOnly && "ring-1 ring-emerald-400")}>{custOnly ? "✓ " : ""}Khách hàng</button></div>
           {stages.length > 0 && <div className="flex gap-1.5 flex-wrap" title="Lọc theo giai đoạn cơ hội của khách — bấm lần nữa để bỏ lọc">
             {stages.map((st) => <button key={st.id} onClick={() => setStageF((v) => (v === st.id ? null : st.id))} className={cn("fchip", stageF === st.id && "on")} style={stageF === st.id ? { background: st.color, borderColor: st.color, color: "#fff" } : { borderColor: st.color }}>{stageLabel(st.name)} <span className="opacity-70 tabular-nums">{stageCount[st.id] ?? 0}</span></button>)}
@@ -224,7 +237,7 @@ export function InboxClient({ initial, labels, members, channels, knowledge, ai 
         {current ? <div className="relative flex-1 min-h-0 flex flex-col">
           {/* bọc div: .btn (CSS ngoài layer) ghi đè "hidden" của Tailwind → trên điện thoại nút này từng đè lên nút ⋯ */}
           <div className="hidden md:block absolute top-3 right-3 z-10"><button className="btn px-2" title={showPanel ? "Ẩn hồ sơ khách (chat rộng hơn)" : "Hiện hồ sơ khách"} onClick={togglePanel}>{showPanel ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</button></div>
-          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} galleryOpen={side === "gallery"} onOpenGallery={toggleGallery} aiSuggest={aiOn && !!ai?.features.suggest} />
+          <Thread key={current.id + ":" + siblings.map((c) => c.id).join(",")} conv={current} siblings={siblings} labels={labels} members={members} knowledge={knowledge} galleryOpen={side === "gallery"} onOpenGallery={toggleGallery} aiSuggest={aiOn && !!ai?.features.suggest} aiAway={!!ai?.enabled} />
         </div> : <div className="m-auto text-slate-400">Chọn một hội thoại</div>}
       </div>
       {/* cột 3: panel khách */}

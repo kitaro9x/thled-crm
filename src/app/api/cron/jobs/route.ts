@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { fbSendMessage } from "@/lib/crm/facebook";
 import { renderTemplate, runAutomation } from "@/lib/crm/automation";
 import { syncDueFeeds } from "@/lib/crm/gcal-sync";
+import { processAway } from "@/lib/crm/away-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -14,12 +15,14 @@ export const maxDuration = 60;
  * 3. Trigger theo lịch (scheduled)
  * 4. Đánh dấu online/offline nhân sự
  * 5. Đồng bộ Google Calendar → Công việc (mỗi lịch 5 phút/lần)
+ * 6. AI trực thay khi chủ shop nghỉ: mỗi lượt xử lý 1 hội thoại đang chờ (src/lib/crm/away-server.ts)
  */
 export async function GET(req: NextRequest) {
   if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) return new NextResponse("forbidden", { status: 403 });
+  const t0 = Date.now();
   const db = supabaseAdmin();
   const now = new Date().toISOString();
-  const report: Record<string, number> = { outbox: 0, sequences: 0, scheduled_rules: 0, gcal_synced: 0 };
+  const report: Record<string, number> = { outbox: 0, sequences: 0, scheduled_rules: 0, gcal_synced: 0, away: 0 };
 
   // 1. outbox (fb only — zalo worker tự lấy)
   const { data: outbox } = await db.from("crm_outbox").select("*, crm_channels(type,credentials)").eq("status", "queued").or(`scheduled_at.is.null,scheduled_at.lte.${now}`).limit(50);
@@ -77,6 +80,9 @@ export async function GET(req: NextRequest) {
 
   // 5. Google Calendar → Công việc (lỗi từng lịch đã ghi vào crm_gcal_feeds.last_error, không làm hỏng cron)
   try { report.gcal_synced = (await syncDueFeeds(db, 5 * 60_000)).synced; } catch (e) { console.error("gcal sync", e); }
+
+  // 6. AI trực thay — chạy sau cùng, dùng phần thời gian còn lại của lượt cron (maxDuration 60s)
+  try { report.away = (await processAway(db, 55_000 - (Date.now() - t0))).handled; } catch (e) { console.error("away", e); }
 
   return NextResponse.json({ ok: true, ...report });
 }

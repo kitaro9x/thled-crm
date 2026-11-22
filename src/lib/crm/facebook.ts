@@ -1,8 +1,10 @@
 const GRAPH = "https://graph.facebook.com/v21.0";
 
-export async function fbSendMessage(pageToken: string, psid: string, text?: string, attachmentUrl?: string, tag?: string, attachmentType: "image" | "video" | "audio" | "file" = "image") {
+/** `metadata`: chuỗi tuỳ ý, Meta gửi lại nguyên văn trong tin dội (message_echoes) — dùng để nhận ra tin do AI trực thay gửi. */
+export async function fbSendMessage(pageToken: string, psid: string, text?: string, attachmentUrl?: string, tag?: string, attachmentType: "image" | "video" | "audio" | "file" = "image", metadata?: string) {
   const message: any = text ? { text } : attachmentUrl ? { attachment: { type: attachmentType, payload: { url: attachmentUrl, is_reusable: true } } } : null;
   if (!message) throw new Error("empty message");
+  if (metadata) message.metadata = metadata;
   const body: any = { recipient: { id: psid }, message, messaging_type: tag ? "MESSAGE_TAG" : "RESPONSE" };
   if (tag) body.tag = tag; // vd POST_PURCHASE_UPDATE / CONFIRMED_EVENT_UPDATE để gửi sau 24h đúng chính sách
   const r = await fetch(`${GRAPH}/me/messages?access_token=${pageToken}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

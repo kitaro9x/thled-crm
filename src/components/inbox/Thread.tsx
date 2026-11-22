@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus, Sparkles, BrainCircuit } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus, Sparkles, BrainCircuit, Moon } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -19,7 +19,7 @@ import { LessonDialog } from "./LessonDialog";
 import { SafeImg } from "./SafeImg";
 import { AI_EVENT_ATTACH, AI_EVENT_INSERT, imageName } from "@/lib/ai-config";
 
-export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery, aiSuggest }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void; /** admin bật AI + nhân viên không tự ẩn */ aiSuggest?: boolean }) {
+export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery, aiSuggest, aiAway }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void; /** admin bật AI + nhân viên không tự ẩn */ aiSuggest?: boolean; /** Trợ lý AI đang bật (để hiện mục tắt/bật AI trực thay cho hội thoại này) */ aiAway?: boolean }) {
   const sb = supabaseBrowser();
   const all = siblings && siblings.length ? siblings : [conv];
   const ids = all.map((c) => c.id);
@@ -95,6 +95,19 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
   const [aiOpen, setAiOpen] = useState(false);
   // "Đưa vào Brain": null = đóng; { ids } = chỉ các tin đã chọn; {} = cả hội thoại
   const [lesson, setLesson] = useState<{ ids?: string[] } | null>(null);
+  // AI trực thay: nhân viên tắt/bật cho riêng hội thoại này (đọc trạng thái khi mở menu ⋯)
+  const [awayOff, setAwayOff] = useState<boolean | null>(null);
+  useEffect(() => { setAwayOff(null); }, [conv.id]);
+  useEffect(() => {
+    if (!showMore || !aiAway || awayOff !== null) return;
+    sb.from("crm_ai_away_state").select("off").eq("conversation_id", conv.id).maybeSingle().then(({ data }) => setAwayOff(!!data?.off));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMore, aiAway, conv.id]);
+  const toggleAwayOff = async () => {
+    const next = !awayOff; setShowMore(false);
+    const r = await fetch("/api/ai/away/conv", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation_id: conv.id, off: next }) }).catch(() => null);
+    if (r?.ok) { setAwayOff(next); setFwdOk(next ? "Đã tắt AI trực thay cho hội thoại này" : "Đã bật lại AI trực thay cho hội thoại này"); setTimeout(() => setFwdOk(""), 3500); }
+  };
   useEffect(() => { setLinked([]); setAiOpen(false); }, [conv.id]);
   const addLinked = (imgs: { url: string; name: string }[]) => setLinked((l) => [...l, ...imgs.filter((x) => !l.some((y) => y.url === x.url))].slice(0, 10));
   const applyAi = (t: string, imgs: AiImage[]) => { setText(t); addLinked(imgs.map((im) => ({ url: im.url, name: imageName(im.code, im.url) }))); setAiOpen(false); setTimeout(() => taRef.current?.focus(), 30); };
@@ -365,6 +378,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           {showMore && <div className="absolute right-0 top-10 z-10 card p-1.5 w-60 shadow-lg text-sm">
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" title="Lưu vào mục Công việc, gắn với khách & cơ hội" onClick={() => { setTaskSeed({}); setShowMore(false); }}><ClipboardPlus size={15} />Tạo công việc…</button>
             {aiSuggest && <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" title="AI chắt hội thoại này thành 1 bài học (đã ẩn danh) để Trợ lý AI và THLED-Brain học cách xử lý" onClick={() => { setLesson({}); setShowMore(false); }}><BrainCircuit size={15} className="text-violet-500" />Đưa vào Brain (bài học)…</button>}
+            {aiAway && conv.kind !== "group" && conv.kind !== "comment" && <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" disabled={awayOff === null} title="Khi anh bật AI trực thay (lúc nghỉ), AI có được tự trả lời hội thoại này không" onClick={toggleAwayOff}><Moon size={15} className={cn(awayOff ? "text-slate-400" : "text-indigo-500")} />{awayOff === null ? "AI trực thay: đang tải…" : awayOff ? "Bật lại AI trực thay cho hội thoại này" : "Tắt AI trực thay cho hội thoại này"}</button>}
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id); setShowMore(false); }}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} />{conv.is_important ? "Bỏ đánh dấu quan trọng" : "Đánh dấu quan trọng"}</button>
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id); setShowMore(false); }}><Check size={15} />{conv.status === "open" ? "Đóng hội thoại (đã xử lý xong)" : "Mở lại hội thoại"}</button>
             <a className="hidden md:flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer" onClick={() => setShowMore(false)}><ExternalLink size={15} />Mở ở tab mới</a>
@@ -417,7 +431,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
                   <div className="min-w-0"><div className="font-semibold truncate">{q.from || "Tin nhắn"}</div><div className="truncate opacity-80">{q.msg || (q.kind === "image" ? "[Hình ảnh]" : q.kind === "video" ? "[Video]" : q.name ? "📎 " + q.name : "[Tệp]")}</div></div>
                 </button>
                 {quoteNote?.id === m.id && <div className={cn("mb-1.5 text-[11px] italic", m.direction === "out" ? "text-white/80" : "text-amber-700")}>{quoteNote.text}</div>}</>); })()}
-              {m.direction === "out" && <div className={cn("text-[11px] font-medium opacity-85 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 Business Suite (AI Meta / trả lời ngoài CRM)" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
+              {m.direction === "out" && <div className={cn("text-[11px] font-medium opacity-85 mb-0.5", (m as any).raw?.meta_ai && "text-violet-200")}>{(m as any).raw?.meta_ai ? "🤖 Business Suite (AI Meta / trả lời ngoài CRM)" : ((m as any).raw?.ai_away || (m as any).sent_by === "ai_away") ? "🌙 AI trực thay (tự động)" : m.sender_member_id ? (memberName[m.sender_member_id] || "Nhân viên") : (byId[m.conversation_id]?.channel_type === "zalo_personal" ? "Zalo (điện thoại)" : "Fanpage (Messenger)")}</div>}
               {(m as any).raw?.bank ? <BankCard bank={(m as any).raw.bank} /> : (m as any).raw?.location ? <LocationCard loc={(m as any).raw.location} /> : (m as any).raw?.contact ? <ContactCard c={(m as any).raw.contact} /> : (m as any).raw?.call ? <CallCard call={(m as any).raw.call} /> : m.text && <div className="whitespace-pre-wrap break-words">{m.text.split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => /^https?:\/\//.test(part) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="underline">{part}</a> : part)}</div>}
               {m.text && firstUrl(m.text) && <LinkPreview url={firstUrl(m.text)!} dark={m.direction === "out"} />}
               <div className={cn("text-[11px] mt-1 flex items-center gap-1 tabular-nums", m.direction === "out" ? "text-blue-100/90" : "text-slate-500")}>{multi && m.direction === "out" && <ChannelIcon type={byId[m.conversation_id]?.channel_type} size={10} />}{multi && byId[m.conversation_id]?.kind === "comment" && "💬 bình luận · "}{dt(m.sent_at)}{m.direction === "out" && m.status === "queued" && " · đang gửi"}{m.status === "failed" && <span className="text-red-100 font-semibold">· chưa gửi được</span>}{m.direction === "out" && m.status === "failed" && <button onClick={() => retry(m)} disabled={sending} className="ml-1 rounded bg-white/90 text-red-700 px-1.5 py-0.5 font-semibold hover:bg-white disabled:opacity-60">Gửi lại</button>}</div>
