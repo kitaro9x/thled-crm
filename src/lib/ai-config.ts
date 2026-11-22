@@ -107,8 +107,10 @@ export const awayActive = (s: AiSettings, now = new Date()) => s.enabled && (man
 export function awaySessionStart(s: AiSettings, now = new Date()): Date | null {
   if (!awayActive(s, now)) return null;
   const starts: number[] = [];
-  if (manualOn(s.away, now)) starts.push(s.away.on_at ? new Date(s.away.on_at).getTime() : now.getTime() - 12 * 3600_000);
-  if (inSchedule(s.away, now)) { const back = (vnMinutes(now) - hhmm(s.away.schedule.from) + 1440) % 1440; starts.push(now.getTime() - back * 60_000); }
+  // Mốc phải ĐỨNG YÊN suốt ca (gọi lúc nào trong ca cũng ra cùng một giá trị) — nếu trôi theo giây, mỗi lượt sẽ bị coi là ca mới
+  // và giới hạn số lượt / câu giữ khách / dòng xưng danh bị lặp lại.
+  if (manualOn(s.away, now)) starts.push(s.away.on_at ? new Date(s.away.on_at).getTime() : 0);
+  if (inSchedule(s.away, now)) { const back = (vnMinutes(now) - hhmm(s.away.schedule.from) + 1440) % 1440; starts.push(Math.floor(now.getTime() / 60_000) * 60_000 - back * 60_000); }
   return new Date(Math.min(...starts));
 }
 

@@ -59,9 +59,10 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
 
   // 3. message (idempotent theo external_msg_id)
   const direction = m.direction || "in";
+  const sentAt = m.sentAt || new Date().toISOString(); // một mốc duy nhất cho cả dòng tin lẫn hàng chờ AI trực thay
   const { data: msg, error } = await db.from("crm_messages").insert({
     conversation_id: conv.id, direction, type: m.type || "text", text: m.text ?? null, attachments: m.attachments || [], sender_name: m.messageSenderName ?? null,
-    external_msg_id: m.externalMsgId ?? null, sent_at: m.sentAt || new Date().toISOString(), raw: m.raw ?? null, status: "sent",
+    external_msg_id: m.externalMsgId ?? null, sent_at: sentAt, raw: m.raw ?? null, status: "sent",
   }).select("id").single();
   if (error && !/duplicate/i.test(error.message)) throw error;
   if (!msg) return { conversationId: conv.id, duplicate: true };
@@ -115,8 +116,8 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   // AI trực thay khi chủ shop nghỉ: xếp hàng trả lời (tự bỏ qua nếu đang tắt / hội thoại không đủ điều kiện; lỗi không chặn luồng nhận tin)
   await queueAwayReply(db, {
     conversationId: conv.id, channelType: channel.type, kind, hidden: !!conv.is_hidden, labels: allLabels,
-    customerId: personId || conv.customer_id || identity.customer_id || null,
-    text: m.text ?? null, sentAt: m.sentAt || new Date().toISOString(), standby: !!(m.raw as any)?.standby,
+    customerId: personId || conv.customer_id || identity.customer_id || null, identityPhone: identity.phone || null,
+    type: m.type || "text", text: m.text ?? null, sentAt, standby: !!(m.raw as any)?.standby,
   });
 
   // 5. Phân phối hội thoại (chỉ khi chưa có người phụ trách)

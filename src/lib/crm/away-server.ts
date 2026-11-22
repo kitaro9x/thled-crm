@@ -3,7 +3,8 @@ import * as z from "zod/v4";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { awayActive, awaySessionStart, imageName, type AiSettings, type AwaySettings } from "@/lib/ai-config";
-import { awayLevel, cleanReply, composeReply, meaningfulText, moneyTalk, ungroundedFree, type AwayLevel } from "@/lib/away";
+import { awayLevel, cleanReply, composeReply, meaningfulText, moneyTalk, ungroundedClaim, type AwayLevel } from "@/lib/away";
+import { normalizePhone } from "@/lib/phone";
 import { cleanKey, getAiSettings, loadBrainCore, lookupTools, productForAi, runClaude, searchProducts, Seen, wrapTranscript } from "@/lib/crm/ai";
 import { lessonContext } from "@/lib/crm/lessons-server";
 import { fbSendMessage } from "@/lib/crm/facebook";
@@ -59,23 +60,36 @@ const uniq = <T,>(a: T[]) => Array.from(new Set(a));
 
 // ───────────────────────── Điều kiện ─────────────────────────
 
-async function levelFor(db: Db, a: AwaySettings, c: { channelType: string | null; kind: string; hidden: boolean; labels: string[]; customerId: string | null }): Promise<AwayLevel> {
-  const { data: skip } = c.labels.length ? await db.from("crm_labels").select("name").in("name", c.labels).eq("skip_lead", true) : { data: [] as { name: string }[] };
-  const base = { channelType: c.channelType, kind: c.kind, hidden: c.hidden, labels: c.labels, skipLabels: (skip || []).map((x) => x.name), hasCustomer: !!c.customerId };
+type LevelCtx = { channelType: string | null; kind: string; hidden: boolean; labels: string[]; customerId: string | null; identityPhone: string | null };
+
+/** Tra không được (lỗi DB) thì coi như KHÔNG đủ điều kiện — thà bỏ sót còn hơn nhắn nhầm người quen. */
+async function levelFor(db: Db, a: AwaySettings, c: LevelCtx): Promise<AwayLevel> {
+  let skipLabels: string[] = [];
+  if (c.labels.length) {
+    const { data, error } = await db.from("crm_labels").select("name").in("name", c.labels).eq("skip_lead", true);
+    if (error) return null;
+    skipLabels = (data || []).map((x) => x.name as string);
+  }
+  const base = { channelType: c.channelType, kind: c.kind, hidden: c.hidden, labels: c.labels, skipLabels, hasCustomer: !!c.customerId };
   const quick = awayLevel(a, { ...base, hasFb: false, hasOrder: false });
   if (quick !== "draft" || !c.customerId) return quick;
-  // Zalo có hồ sơ nhưng chưa có nhãn khách: từng nhắn Fanpage hoặc đã có đơn → rõ là khách
-  const [{ data: fb }, { data: od }] = await Promise.all([
+  // Zalo có hồ sơ nhưng chưa có nhãn khách: "từng nhắn Fanpage / đã có đơn" chỉ được tính khi SĐT của CHÍNH tài khoản Zalo trùng SĐT hồ sơ.
+  // Hồ sơ gắn nhờ một số điện thoại xuất hiện trong nội dung tin (vd người quen nhắn "gọi anh A 09xx") thì chưa chắc là cùng một người → chỉ nháp.
+  const [{ data: cu }, { data: fb }, { data: od }] = await Promise.all([
+    db.from("crm_customers").select("phone").eq("id", c.customerId).maybeSingle(),
     db.from("crm_v_conversations").select("id").eq("customer_id", c.customerId).eq("channel_type", "fb_page").limit(1),
     db.from("crm_orders").select("id").eq("person_id", c.customerId).limit(1),
   ]);
+  const own = normalizePhone(c.identityPhone);
+  if (!own || own !== normalizePhone(cu?.phone as string | null | undefined)) return "draft";
   return awayLevel(a, { ...base, hasFb: !!fb?.length, hasOrder: !!od?.length });
 }
 
 /** Gọi từ ingestMessage khi KHÁCH nhắn (đã qua bước lọc nhãn cá nhân). Không bao giờ ném lỗi ra ngoài. */
-export async function queueAwayReply(db: Db, p: { conversationId: string; channelType: string; kind: string; hidden: boolean; labels: string[]; customerId: string | null; text: string | null; sentAt: string; standby: boolean }) {
+export async function queueAwayReply(db: Db, p: LevelCtx & { conversationId: string; type: string; text: string | null; sentAt: string; standby: boolean }) {
   try {
-    if (p.kind !== "inbox" || p.hidden || p.standby || !meaningfulText(p.text)) return;
+    // sticker / tin thoại / cuộc gọi / ảnh không lời: AI không đọc được → không tự trả lời (thông báo đẩy "khách nhắn" vẫn tới như thường)
+    if (p.kind !== "inbox" || p.hidden || p.standby || ["sticker", "audio", "event"].includes(p.type) || !meaningfulText(p.text)) return;
     if (Date.now() - ts(p.sentAt) > 5 * 60_000) return; // tin cũ được đồng bộ lại → không trả lời
     const settings = await getAiSettings(db);
     if (!awayActive(settings) || !cleanKey()) return;
@@ -109,6 +123,8 @@ async function notifyHuman(db: Db, cv: any, title: string, detail: string, urgen
 // ───────────────────────── Gửi ─────────────────────────
 
 type SendResult = { ok: true } | { ok: false; reason: string; retry?: boolean };
+/** Các lý do không gửi mà KHÔNG cần báo người: đã có người lo, hoặc AI sẽ soạn lại theo tin mới */
+const QUIET = new Set(["newer_inbound", "answered", "outbox_busy", "off"]);
 const REASON_VN: Record<string, string> = { lease: "quá thời gian xử lý", off: "hội thoại đã tắt AI trực thay", newer_inbound: "khách vừa nhắn thêm — soạn lại", answered: "đã có người trả lời", outbox_busy: "đang có tin khác chờ gửi", no_recipient: "không xác định được người nhận", thread_control: "Meta AI / Business Suite đang giữ hội thoại", worker_down: "Zalo đang mất kết nối" };
 
 async function sendZalo(db: Db, cv: any, snapshot: string, text: string, images: { url: string; code: string }[]): Promise<SendResult> {
@@ -125,14 +141,24 @@ async function sendFb(db: Db, cv: any, snapshot: string, text: string, images: {
   const { data: ch } = await db.from("crm_channels").select("credentials").eq("id", cv.channel_id).maybeSingle();
   const token: string | undefined = (ch?.credentials as any)?.page_access_token;
   if (!token || !cv.external_id) return { ok: false, reason: "no_recipient" };
-  // kiểm lần cuối ngay trước khi gửi (Messenger không gửi qua hàng đợi nên không gói được trong 1 giao dịch)
-  const { data: newer } = await db.from("crm_messages").select("direction").eq("conversation_id", cv.id).gt("sent_at", snapshot).limit(5);
-  if (newer?.some((m) => m.direction === "out")) return { ok: false, reason: "answered" };
+  // kiểm lần cuối ngay trước khi gửi (Messenger không gửi qua hàng đợi nên không gói được trong 1 giao dịch như Zalo)
+  const [{ data: stNow, error: stErr }, { data: newer, error: nwErr }] = await Promise.all([
+    db.from("crm_ai_away_state").select("status,off,lease_until").eq("conversation_id", cv.id).maybeSingle(),
+    db.from("crm_messages").select("direction,status").eq("conversation_id", cv.id).gt("sent_at", snapshot).limit(10),
+  ]);
+  if (stErr || nwErr) return { ok: false, reason: (stErr || nwErr)!.message };
+  if (!stNow || stNow.status !== "running" || ts(stNow.lease_until) < Date.now()) return { ok: false, reason: "lease" };
+  if (stNow.off) return { ok: false, reason: "off" };
+  if (newer?.some((m) => m.direction === "out" && m.status !== "failed")) return { ok: false, reason: "answered" };
   if (newer?.some((m) => m.direction === "in")) return { ok: false, reason: "newer_inbound" };
+  // Mọi dòng của lượt trả lời này (chữ + ảnh) mang CÙNG một mốc giờ lấy trước khi gửi: ảnh gửi xong chậm vài giây mà ghi giờ muộn hơn
+  // thì tin khách nhắn chen vào giữa sẽ bị coi là "đã có người trả lời" và không bao giờ được đáp.
+  const base = Date.now(); let seq = 0;
   const save = async (mid: string, row: Record<string, unknown>) => {
-    const { error } = await db.from("crm_messages").insert({ conversation_id: cv.id, direction: "out", status: "sent", sent_by: "ai_away", raw: { ai_away: true }, external_msg_id: mid, ...row });
-    // tin dội lại (webhook) tới trước và đã ghi → chỉ cần đánh dấu là tin AI
-    if (error && /duplicate/i.test(error.message)) await db.from("crm_messages").update({ sent_by: "ai_away" }).eq("external_msg_id", mid);
+    const sent_at = new Date(base + seq++).toISOString();
+    const { error } = await db.from("crm_messages").insert({ conversation_id: cv.id, direction: "out", status: "sent", sent_by: "ai_away", raw: { ai_away: true }, external_msg_id: mid, sent_at, ...row });
+    // tin dội lại (webhook) tới trước và đã ghi → chỉ cần đánh dấu là tin AI + đưa về cùng mốc giờ
+    if (error && /duplicate/i.test(error.message)) await db.from("crm_messages").update({ sent_by: "ai_away", sent_at }).eq("external_msg_id", mid).eq("conversation_id", cv.id);
   };
   try {
     const r = await fbSendMessage(token, cv.external_id, text, undefined, undefined, "image", "ai_away");
@@ -154,26 +180,33 @@ async function sendFb(db: Db, cv: any, snapshot: string, text: string, images: {
 async function handleOne(db: Db, settings: AiSettings, st: any, deadline: number) {
   const started = Date.now(); const now = new Date(); const a = settings.away;
   const convId: string = st.conversation_id;
-  const finish = (snapshot: string, replied: boolean, handoff: boolean, sess: Date | null) =>
-    db.rpc("crm_ai_away_finish", { p_conv: convId, p_snapshot: snapshot, p_replied: replied, p_handoff: handoff, p_session_start: sess ? sess.toISOString() : null }).then(() => {}, () => {});
-  const epoch = new Date(0).toISOString();
+  // Kết thúc lượt: chỉ xếp hàng lại khi TRONG LÚC XỬ LÝ có tin khách mới được ghi nhận (last_in_at lớn hơn giá trị lúc nhận việc).
+  // Dùng nguyên chuỗi last_in_at của lượt nhận việc — không so với giờ máy hay giờ của tin trong bảng, nên không thể tự xếp hàng lặp vô hạn.
+  const claimedAt: string = st.last_in_at || new Date().toISOString();
+  const done = (replied: boolean, handoff: boolean, sess: Date | null = null) =>
+    db.rpc("crm_ai_away_finish", { p_conv: convId, p_snapshot: claimedAt, p_replied: replied, p_handoff: handoff, p_session_start: sess ? sess.toISOString() : null }).then(() => {}, () => {});
 
   const { data: cv } = await db.from("crm_v_conversations").select("id,identity_id,customer_id,channel_id,channel_type,kind,labels,is_hidden,external_id,assigned_to,display_name,person_name,meta").eq("id", convId).maybeSingle();
-  if (!cv) return finish(epoch, false, false, null);
-  const { data: ident } = await db.from("crm_identities").select("meta").eq("id", cv.identity_id).maybeSingle();
+  if (!cv) return done(false, false);
+  const { data: ident } = await db.from("crm_identities").select("meta,phone").eq("id", cv.identity_id).maybeSingle();
   const labels = uniq([...((cv.labels as string[]) || []), ...(((ident?.meta as any)?.zalo_labels as string[]) || [])]);
-  const level = await levelFor(db, a, { channelType: cv.channel_type, kind: cv.kind, hidden: !!cv.is_hidden, labels, customerId: cv.customer_id });
+  const level = await levelFor(db, a, { channelType: cv.channel_type, kind: cv.kind, hidden: !!cv.is_hidden, labels, customerId: cv.customer_id, identityPhone: (ident?.phone as string | null) || null });
 
-  const { data: rows } = await db.from("crm_messages").select("id,direction,type,text,attachments,sent_at,sender_member_id,sent_by,raw").eq("conversation_id", convId).order("sent_at", { ascending: false }).limit(30);
-  const msgs = (rows || []).reverse();
+  const { data: rows } = await db.from("crm_messages").select("id,direction,type,text,attachments,sent_at,sender_member_id,sent_by,status,raw").eq("conversation_id", convId).order("sent_at", { ascending: false }).limit(60);
+  // tin đi gửi hỏng (vd tin AI bị huỷ vì Zalo mất kết nối) coi như chưa từng gửi: không tính là "đã trả lời", không đưa vào ngữ cảnh
+  const msgs = (rows || []).reverse().filter((m) => !(m.direction === "out" && m.status === "failed"));
   const lastIn = [...msgs].reverse().find((m) => m.direction === "in");
-  if (!level || !lastIn) return finish(lastIn?.sent_at || epoch, false, false, null);
+  if (!level || !lastIn) return done(false, false);
   const snapshot: string = lastIn.sent_at;
   const mode: "live" | "shadow" = a.mode === "live" && level === "live" ? "live" : "shadow";
   const base = { conversation_id: convId, mode };
-  const done = (replied: boolean, handoff: boolean, sess: Date | null = null) => finish(snapshot, replied, handoff, sess);
-  /** Gửi bị chặn vì khách vừa nhắn thêm (kể cả chỉ gửi ảnh — loại tin không tự xếp hàng) → xếp hàng lại để soạn theo tin mới. */
-  const requeueIfNewer = async (reason: string) => { if (reason === "newer_inbound") await db.rpc("crm_ai_away_enqueue", { p_conv: convId, p_msg_at: new Date().toISOString(), p_delay_sec: 20 }).then(() => {}, () => {}); };
+  /** Gửi bị chặn vì khách vừa nhắn thêm (kể cả chỉ gửi ảnh — loại tin không tự xếp hàng) → xếp hàng lại theo ĐÚNG giờ của tin mới đó.
+   *  Mỗi lần xếp lại cần một tin khách mới hơn mốc của lượt này, nên số lần lặp không vượt quá số tin khách thật. */
+  const requeueIfNewer = async (reason: string) => {
+    if (reason !== "newer_inbound") return;
+    const { data: nw } = await db.from("crm_messages").select("sent_at").eq("conversation_id", convId).eq("direction", "in").gt("sent_at", snapshot).order("sent_at", { ascending: false }).limit(1);
+    if (nw?.[0]?.sent_at) await db.rpc("crm_ai_away_enqueue", { p_conv: convId, p_msg_at: nw[0].sent_at, p_delay_sec: 20 }).then(() => {}, () => {});
+  };
 
   // đã có ai trả lời sau tin khách cuối → thôi
   if (msgs.some((m) => m.direction === "out" && ts(m.sent_at) > ts(snapshot))) return done(false, false);
@@ -199,8 +232,13 @@ async function handleOne(db: Db, settings: AiSettings, st: any, deadline: number
   const sess = new Date(Math.max(awayStart.getTime(), humanOut ? ts(humanOut.sent_at) : 0));
   const sameSess = !!st.session_start && ts(st.session_start) >= sess.getTime() - 1;
   const replies: number = sameSess ? st.replies || 0 : 0;
-  const handoffDone = sameSess && !!st.handoff_at;
-  const first = replies === 0 && !handoffDone;
+  const hold = cleanReply(a.handoff_text, cv.channel_type);
+  // Gửi thật: căn cứ vào tin AI còn nằm trong hội thoại (tin gửi hỏng đã bị lọc ở trên), không căn cứ bộ đếm —
+  // với Zalo "đã xếp hàng" chưa chắc đã tới khách; tin hỏng thì lượt sau phải xưng danh / gửi câu giữ khách lại.
+  // Chạy thử: không có tin thật nên dùng bộ đếm (được cộng như thể đã gửi) để nhật ký giống lúc gửi thật.
+  const aiSent = msgs.filter((m) => m.direction === "out" && isAiMsg(m) && ts(m.sent_at) >= sess.getTime());
+  const handoffDone = mode === "live" ? aiSent.some((m) => String(m.text || "").includes(hold)) : sameSess && !!st.handoff_at;
+  const first = mode === "live" ? aiSent.length === 0 : replies === 0 && !handoffDone;
 
   /** Gửi (hoặc ghi nháp nếu chạy thử). Trả về đã gửi thật chưa. */
   const deliver = async (text: string, images: { url: string; code: string }[]): Promise<SendResult> => {
@@ -210,17 +248,17 @@ async function handleOne(db: Db, settings: AiSettings, st: any, deadline: number
   /** Chuyển cho người: câu giữ khách (1 lần / ca) + tạo việc + báo đẩy. */
   const handoff = async (need: string, reason: string, urgent: boolean, ms: number | null) => {
     if (handoffDone) { await logRun(db, { ...base, action: "handoff", need, reason: `${reason} (đã gửi câu hẹn trong ca này — không gửi lại)`, ms }); return done(false, false, sess); }
-    const text = composeReply({ text: cleanReply(a.handoff_text, cv.channel_type), first, products: [] });
+    const text = composeReply({ text: hold, first, products: [] });
     const r = await deliver(text, []);
     if (!r.ok && r.reason !== "shadow") {
       await logRun(db, { ...base, action: "blocked", need, reason, reply: text, error: REASON_VN[r.reason] || r.reason, ms });
-      if (!["newer_inbound", "answered"].includes(r.reason)) await notifyHuman(db, cv, need || "cần người trả lời", `${reason}\n(AI không gửi được câu hẹn: ${REASON_VN[r.reason] || r.reason})`, urgent);
+      if (!QUIET.has(r.reason)) await notifyHuman(db, cv, need || "cần người trả lời", `${reason}\n(AI không gửi được câu hẹn: ${REASON_VN[r.reason] || r.reason})\nTin khách: ${String(lastIn.text || "").slice(0, 300)}`, urgent);
       await done(false, false, sess);
       return requeueIfNewer(r.reason);
     }
     await logRun(db, { ...base, action: "handoff", need, reason, reply: text, sent: r.ok, ms });
     if (r.ok) await notifyHuman(db, cv, need || "cần người trả lời", `${reason}\nTin khách: ${String(lastIn.text || "").slice(0, 300)}`, urgent);
-    return done(false, r.ok, sess);
+    return done(false, true, sess); // chạy thử cũng ghi nhận "đã hẹn" để không soạn lại câu hẹn ở lượt sau
   };
 
   if (replies >= a.max_per_conv) return handoff("Khách vẫn đang hỏi tiếp", `AI đã trả lời đủ ${a.max_per_conv} lượt trong ca này`, false, null);
@@ -289,9 +327,11 @@ async function handleOne(db: Db, settings: AiSettings, st: any, deadline: number
   // ── answer: chốt chặn bằng code trước khi gửi
   const text = cleanReply(out.text, cv.channel_type);
   const hits = uniq(out.product_codes).map((c) => seen.product(c)).filter((p): p is NonNullable<typeof p> => !!p).slice(0, 4);
+  const money = text ? moneyTalk(text) : null; const claim = text ? ungroundedClaim(text, core) : null;
   const blocked = !text ? "AI không soạn được nội dung"
-    : moneyTalk(text) ? `AI tự viết nội dung ${moneyTalk(text)} — không gửi`
-    : ungroundedFree(text, core) ? `AI viết "${ungroundedFree(text, core)}" không có trong cam kết dịch vụ — không gửi`
+    : money ? `AI tự viết nội dung ${money} — không gửi`
+    : claim ? `AI viết "${claim}" không có trong tài liệu cam kết — không gửi`
+    : isThau && hits.length ? "khách nhà thầu hỏi giá — không tự gửi giá niêm yết" // chốt bằng code, không chỉ dặn trong prompt
     : null;
   // bị chặn → chuyển cho người; giữ lại câu AI định gửi trong nhật ký để chủ shop xem AI sai ở đâu
   if (blocked) return handoff(out.need, `${out.reason} · ${blocked}${text ? ` · AI định gửi: “${text.slice(0, 300)}”` : ""}`, out.urgency === "high", ms);
@@ -304,21 +344,27 @@ async function handleOne(db: Db, settings: AiSettings, st: any, deadline: number
   const codesOut = hits.map((p) => p.code);
   if (!r.ok && r.reason !== "shadow") {
     await logRun(db, { ...base, action: "blocked", need: out.need, reason: out.reason, reply, product_codes: codesOut, error: REASON_VN[r.reason] || r.reason, ms });
-    if (["thread_control", "worker_down"].includes(r.reason)) await notifyHuman(db, cv, out.need || "cần người trả lời", `AI đã soạn nhưng không gửi được: ${REASON_VN[r.reason]}`, false);
+    if (!QUIET.has(r.reason)) await notifyHuman(db, cv, out.need || "cần người trả lời", `AI đã soạn nhưng không gửi được: ${REASON_VN[r.reason] || r.reason}\nTin khách: ${String(lastIn.text || "").slice(0, 300)}`, out.urgency === "high");
     await done(false, false, sess);
     return requeueIfNewer(r.reason);
   }
   await logRun(db, { ...base, action: "answer", need: out.need, reason: out.reason, reply, product_codes: codesOut, sent: r.ok, ms });
-  return done(r.ok, false, sess);
+  return done(true, false, sess); // chạy thử cũng tính 1 lượt để giới hạn / dòng xưng danh trong nhật ký giống lúc gửi thật
 }
 
 // ───────────────────────── Cron ─────────────────────────
 
 /** Gọi mỗi phút từ /api/cron/jobs với số mili-giây còn lại của lượt cron. Mỗi lượt xử lý tối đa 1 hội thoại. */
 export async function processAway(db: Db, budgetMs: number): Promise<{ handled: number; note?: string }> {
-  await db.rpc("crm_ai_away_expire_outbox").then(() => {}, () => {});
+  // tin AI xếp hàng mà worker Zalo chưa gửi trong 60 giây → huỷ + báo người (không để gửi muộn)
+  const { data: expired } = await db.rpc("crm_ai_away_expire", { p_after_sec: 60 });
+  for (const id of uniq(Array.isArray(expired) ? (expired as string[]) : [])) {
+    await logRun(db, { conversation_id: id, mode: "live", action: "error", error: "Zalo không gửi được tin AI trong 60 giây — đã huỷ, khách CHƯA nhận được" });
+    const { data: cv } = await db.from("crm_v_conversations").select("id,customer_id,assigned_to,display_name,person_name").eq("id", id).maybeSingle();
+    if (cv) await notifyHuman(db, cv, "AI đã soạn nhưng Zalo không gửi được", "Tin AI xếp hàng quá 60 giây chưa gửi (Zalo mất kết nối hoặc đang gửi dồn) nên đã huỷ. Khách chưa nhận được câu trả lời.", false);
+  }
   const { data: reaped } = await db.rpc("crm_ai_away_reap");
-  for (const id of ((reaped as unknown as string[]) || [])) await logRun(db, { conversation_id: id, mode: "-", action: "error", error: "Lượt xử lý bị treo quá thời gian — đã huỷ, không gửi gì" });
+  for (const id of (Array.isArray(reaped) ? (reaped as string[]) : [])) await logRun(db, { conversation_id: id, mode: "-", action: "error", error: "Lượt xử lý bị treo quá thời gian — đã huỷ, không gửi gì" });
 
   const settings = await getAiSettings(db);
   if (!awayActive(settings)) {
@@ -335,7 +381,7 @@ export async function processAway(db: Db, budgetMs: number): Promise<{ handled: 
   catch (e: any) {
     console.error("away handle", e);
     await logRun(db, { conversation_id: st.conversation_id, mode: "-", action: "error", error: String(e?.message || e) });
-    await db.rpc("crm_ai_away_finish", { p_conv: st.conversation_id, p_snapshot: new Date().toISOString(), p_replied: false, p_handoff: false, p_session_start: null }).then(() => {}, () => {});
+    await db.rpc("crm_ai_away_finish", { p_conv: st.conversation_id, p_snapshot: st.last_in_at || new Date().toISOString(), p_replied: false, p_handoff: false, p_session_start: null }).then(() => {}, () => {});
   }
   return { handled: 1 };
 }
