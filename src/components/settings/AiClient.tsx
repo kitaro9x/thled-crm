@@ -131,7 +131,7 @@ export function AiClient({ initial, brainSync, pages, stats, hasKey, hasSyncSecr
           <div className="rounded-md bg-slate-50 p-2"><div className="text-xs text-slate-500">Thời gian TB</div><div className="text-lg font-semibold tabular-nums">{(stats.avgMs / 1000).toFixed(1)}s</div></div>
           <div className="rounded-md bg-slate-50 p-2"><div className="text-xs text-slate-500">Lỗi</div><div className={cn("text-lg font-semibold tabular-nums", stats.failed ? "text-red-600" : "")}>{stats.failed}</div></div>
         </div>
-        <div className="text-xs text-slate-600">{Object.entries(stats.byFeature).map(([k, v]) => `${({ suggest: "Gợi ý", ask: "Tra cứu", summary: "Tóm tắt" } as Record<string, string>)[k] || k}: ${v.calls} lần · ${vnd(v.usd)}`).join("  ·  ")}</div>
+        <div className="text-xs text-slate-600">{Object.entries(stats.byFeature).map(([k, v]) => `${({ suggest: "Gợi ý", ask: "Tra cứu", summary: "Tóm tắt", lesson: "Bài học", away: "Trực thay" } as Record<string, string>)[k] || k}: ${v.calls} lần · ${vnd(v.usd)}`).join("  ·  ")}</div>
         {stats.errors.length > 0 && <div className="text-xs text-red-600">{stats.errors.map((e, i) => <div key={i}>{dt(e.at, "HH:mm dd/MM")} · {e.feature}: {e.error}</div>)}</div>}
       </>}
     </div>

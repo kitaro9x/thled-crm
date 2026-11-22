@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus, Sparkles } from "lucide-react";
+import { Send, Clock, Tag, UserPlus, Star, Check, Zap, Paperclip, X, ArrowDown, Forward, Users, Pencil, ShoppingCart, Images, ExternalLink, Reply, MessageSquareQuote, Copy, CheckSquare, Square, MoreHorizontal, Trash2, Ban, RotateCcw, ClipboardList, ClipboardPlus, Plus, Sparkles, BrainCircuit } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import type { Conversation, Label, Message } from "@/lib/types";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -15,6 +15,7 @@ import { CallCard } from "./CallCard";
 import { TaskDialog, TaskList, taskSeedFrom, useOpenTasks, type TaskSeed } from "./Tasks";
 import { Lightbox } from "./Lightbox";
 import { AiSuggestPanel, type AiImage } from "./AiSuggest";
+import { LessonDialog } from "./LessonDialog";
 import { SafeImg } from "./SafeImg";
 import { AI_EVENT_ATTACH, AI_EVENT_INSERT, imageName } from "@/lib/ai-config";
 
@@ -92,6 +93,8 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
   // ảnh đã có URL sẵn (ảnh sản phẩm do AI gợi ý / Trợ lý AI) → gửi thẳng, không tải lên lại
   const [linked, setLinked] = useState<{ url: string; name: string }[]>([]);
   const [aiOpen, setAiOpen] = useState(false);
+  // "Đưa vào Brain": null = đóng; { ids } = chỉ các tin đã chọn; {} = cả hội thoại
+  const [lesson, setLesson] = useState<{ ids?: string[] } | null>(null);
   useEffect(() => { setLinked([]); setAiOpen(false); }, [conv.id]);
   const addLinked = (imgs: { url: string; name: string }[]) => setLinked((l) => [...l, ...imgs.filter((x) => !l.some((y) => y.url === x.url))].slice(0, 10));
   const applyAi = (t: string, imgs: AiImage[]) => { setText(t); addLinked(imgs.map((im) => ({ url: im.url, name: imageName(im.code, im.url) }))); setAiOpen(false); setTimeout(() => taRef.current?.focus(), 30); };
@@ -361,6 +364,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           <button className={cn("tbtn", showMore && "active")} title="Thêm thao tác" onClick={() => { setShowMore((v) => !v); setShowLabels(false); setShowAssign(false); }}><MoreHorizontal size={16} /></button>
           {showMore && <div className="absolute right-0 top-10 z-10 card p-1.5 w-60 shadow-lg text-sm">
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" title="Lưu vào mục Công việc, gắn với khách & cơ hội" onClick={() => { setTaskSeed({}); setShowMore(false); }}><ClipboardPlus size={15} />Tạo công việc…</button>
+            {aiSuggest && <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" title="AI chắt hội thoại này thành 1 bài học (đã ẩn danh) để Trợ lý AI và THLED-Brain học cách xử lý" onClick={() => { setLesson({}); setShowMore(false); }}><BrainCircuit size={15} className="text-violet-500" />Đưa vào Brain (bài học)…</button>}
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ is_important: !conv.is_important }).eq("id", conv.id); setShowMore(false); }}><Star size={15} className={cn(conv.is_important && "fill-amber-400 text-amber-400")} />{conv.is_important ? "Bỏ đánh dấu quan trọng" : "Đánh dấu quan trọng"}</button>
             <button className="flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" onClick={() => { sb.from("crm_conversations").update({ status: conv.status === "open" ? "closed" : "open" }).eq("id", conv.id); setShowMore(false); }}><Check size={15} />{conv.status === "open" ? "Đóng hội thoại (đã xử lý xong)" : "Mở lại hội thoại"}</button>
             <a className="hidden md:flex w-full items-center gap-2 px-2 py-2 rounded hover:bg-slate-50" href={`/inbox?c=${conv.id}`} target="_blank" rel="noreferrer" onClick={() => setShowMore(false)}><ExternalLink size={15} />Mở ở tab mới</a>
@@ -387,6 +391,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
       </div>}
       {conv.ai_summary && <div className="mx-4 mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900"><b>AI tóm tắt:</b> {conv.ai_summary}</div>}
       {taskSeed && <TaskDialog conv={conv} members={members} seed={taskSeed} onClose={(r) => { setTaskSeed(null); if (r) { setPicked(new Set()); setFwdOk(`Đã tạo công việc${r.assignee ? " · giao " + r.assignee : ""}${r.due ? " · hạn " + r.due : ""}`); setTimeout(() => setFwdOk(""), 3500); } }} />}
+      {lesson && <LessonDialog convId={conv.id} messageIds={lesson.ids} onClose={(r) => { setLesson(null); if (r) { setPicked(new Set()); setFwdOk(r.status === "approved" ? "Đã lưu bài học — Trợ lý AI dùng ngay" : "Đã gửi bài học, chờ admin duyệt"); setTimeout(() => setFwdOk(""), 4000); } }} />}
       {lb !== null && allImages.length > 0 && <Lightbox images={allImages} index={lb} onClose={() => setLb(null)} />}
       {(() => { const ai = (conv as any).meta?.ai_meta; if (conv.channel_type !== "fb_page" || !ai) return null; const ref = ai.standby ? ai.standby_at : ai.last_at; if (!ref) return null; const fresh = Date.now() - new Date(ref).getTime() < 48 * 3600000; if (!fresh && !ai.standby) return null; return (
         <div className={cn("shrink-0 flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs border-b", ai.taken_over ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-violet-50 border-violet-100 text-violet-800")}>
@@ -394,7 +399,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           <button className="btn px-2 py-1 text-xs ml-auto" disabled={handoverBusy} onClick={() => handover(ai.taken_over ? "release" : "take")}>{handoverBusy ? "Đang xử lý…" : ai.taken_over ? "Trả lại cho AI Meta" : "Tôi tự trả lời"}</button>
           {handoverMsg && <span className="w-full text-red-600">{handoverMsg}</span>}
         </div>); })()}
-      {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" title="Gom các tin đã chọn (chữ + ảnh) thành 1 công việc trong mục Công việc" onClick={() => setTaskSeed(taskSeedFrom(msgs.filter((x) => picked.has(x.id)), conv))}><ClipboardPlus size={14} className="inline mr-1" />Tạo công việc</button><button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
+      {picked.size > 0 && <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-sm"><b>Đã chọn {picked.size}</b><button className="btn btn-primary px-2 py-1 text-xs" onClick={() => setFwd({ items: msgs.filter((x) => picked.has(x.id)).map((x) => ({ text: x.text, attachments: x.attachments })) })}><Forward size={14} className="inline mr-1" />Chuyển tiếp</button><button className="btn px-2 py-1 text-xs" title="Gom các tin đã chọn (chữ + ảnh) thành 1 công việc trong mục Công việc" onClick={() => setTaskSeed(taskSeedFrom(msgs.filter((x) => picked.has(x.id)), conv))}><ClipboardPlus size={14} className="inline mr-1" />Tạo công việc</button>{aiSuggest && <button className="btn px-2 py-1 text-xs" title="AI chắt các tin đã chọn thành 1 bài học (đã ẩn danh) cho Trợ lý AI và THLED-Brain" onClick={() => setLesson({ ids: msgs.filter((x) => picked.has(x.id)).map((x) => x.id) })}><BrainCircuit size={14} className="inline mr-1 text-violet-500" />Đưa vào Brain</button>}<button className="btn px-2 py-1 text-xs" onClick={() => setPicked(new Set(msgs.filter((x) => x.attachments?.some((a) => a.type === "image")).map((x) => x.id)))}>Chọn tất cả ảnh</button><button className="btn px-2 py-1 text-xs ml-auto" onClick={() => setPicked(new Set())}>Huỷ</button></div>}
       {fwd && <ForwardDialog text={fwd.text} attachments={fwd.attachments} items={fwd.items} excludeId={conv.id} onClose={(sent) => { setFwd(null); if (sent) { setPicked(new Set()); setFwdOk("Đã chuyển tiếp tới " + sent); setTimeout(() => setFwdOk(""), 3000); } }} />}
       {fwdOk && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-20 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow">{fwdOk}</div>}
       <div ref={scroller} onScroll={onScroll} onClick={(e) => { if (touchActions && !(e.target as HTMLElement).closest(".msg-actions")) setTouchActions(null); }} className="flex-1 overflow-y-auto px-4 py-3 space-y-2 relative">

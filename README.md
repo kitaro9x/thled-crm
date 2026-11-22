@@ -102,11 +102,13 @@ Bật/tắt ở **Cài đặt → Trợ lý AI (Claude)** (chỉ admin; mặc đ
 | Gợi ý trả lời (3 phương án, kèm ảnh SP) | nút **Gợi ý AI** trong ô soạn tin — chỉ chèn, không tự gửi | `POST /api/ai/suggest` |
 | Tra giá / ảnh / chính sách | khung *Trợ lý AI* cột phải → *Ảnh* / *Chèn* vào ô soạn | `POST /api/ai/ask` |
 | Tóm tắt hội thoại | nút *AI tóm tắt* cột phải | `POST /api/ai/summarize` |
+| Đưa vào Brain (bài học) | menu ⋯ của hội thoại, hoặc chọn vài tin → *Đưa vào Brain* | `POST /api/ai/lessons/draft` → `POST /api/ai/lessons` |
 
 - Model mặc định `claude-opus-5-5` (đổi Sonnet/Haiku 5.5 trong Cài đặt), SDK `@anthropic-ai/sdk`, structured output + tool chỉ-đọc (`search_products` → RPC `crm_ai_search_products` trên `landing_items` + `landing_fans`; `search_brain`; `search_quick_replies`). Giá/ảnh trên thẻ lấy từ DB, AI không tự viết. Mỗi lần gọi ghi `crm_ai_logs` (token → chi phí ước tính trong Cài đặt).
 - Khách **thầu**: hội thoại có nhãn chứa “Thầu” → AI áp chính sách thầu (nhân viên đổi tay Lẻ/Thầu được).
 - **THLED-Brain** (repo `kitaro9x/thled-brain`): GitHub Action `dong-bo-crm.yml` gửi **chỉ vùng chung** `01-noi-bo-chung/` sang `POST /api/internal/brain-sync` (header `x-brain-secret`). Server kiểm lần 2 (`src/lib/crm/brain.ts`: path, `vung: chung`, từ vùng riêng) rồi thay toàn bộ `crm_brain_pages` / `crm_brain_chunks`. Trang “luôn nạp” (cam kết dịch vụ, sổ tay văn hoá, chính sách thầu) vào system prompt có cache 1 giờ.
-- Migration: `supabase/migrations/20261115_ai_assistant.sql`.
+- **Bài học từ hội thoại** (`crm_ai_lessons`): AI chắt hội thoại thành bài học đã ẩn danh (`scrubPii` trong `src/lib/lessons.ts` xoá SĐT, email, link cá nhân; giữ SĐT của shop). Admin lưu → `approved`, nhân viên khác → `pending` chờ duyệt ở Cài đặt → Trợ lý AI. Bài `approved` vào prompt của Gợi ý / Tra cứu (quy tắc rút ra trong system prompt + 3 tình huống khớp nhất, tra phía server — `src/lib/crm/lessons-server.ts`), và được GitHub Action của THLED-Brain kéo về `raw/inbox/` qua `GET/POST /api/internal/brain-lessons` (cùng `BRAIN_SYNC_SECRET`).
+- Migration: `supabase/migrations/20261115_ai_assistant.sql`, `20261115_ai_search_images.sql`, `20261115_ai_search_fans_light.sql`, `20261122_ai_lessons.sql`.
 
 ## 10. Chưa làm / roadmap
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as z from "zod/v4";
 import { aiGuard, aiErrorResponse, loadBrainCore, loadConversation, lookupTools, productForAi, runClaude, salesSystem, searchProducts, Seen, sourcesFrom, wrapTranscript, type CustomerMode } from "@/lib/crm/ai";
+import { lessonContext } from "@/lib/crm/lessons-server";
 
 export const maxDuration = 60;
 
@@ -36,7 +37,11 @@ export async function POST(req: NextRequest) {
     const pre = (await Promise.all(codes.map((c) => searchProducts(db, { q: c, limit: 3 }).catch(() => [])))).flat().filter((p) => codes.includes(p.code.toUpperCase()));
     seen.addProducts(pre);
 
-    const core = await loadBrainCore(db, settings.brain_pinned, seen);
+    // bài học đã duyệt: quy tắc ngắn vào system (cache), 3 tình huống giống nhất vào prompt — không tốn thêm lượt tra
+    const [core, lessons] = await Promise.all([
+      loadBrainCore(db, settings.brain_pinned, seen),
+      lessonContext(db, `${hint} ${ctx.lastMessages.slice(-8).join(" ")}`),
+    ]);
     const lastIsCustomer = ctx.lastDirection !== "out";
     const g2 = ctx.person?.gender ? String(ctx.person.gender).toLowerCase() : "";
     const prompt = [
@@ -47,6 +52,7 @@ export async function POST(req: NextRequest) {
       ctx.conv.ai_summary ? `Tóm tắt trước đó:\n${ctx.conv.ai_summary}` : "",
       pre.length ? `Sản phẩm được nhắc trong chat (đã tra sẵn):\n${JSON.stringify(pre.map(productForAi))}` : "",
       hint ? `Nhân viên muốn hướng trả lời: ${hint}` : "",
+      lessons.similar ? `Tình huống tương tự shop đã xử lý (bài học đã duyệt — tham khảo cách làm, không chép nguyên văn nếu không hợp):\n${lessons.similar}` : "",
       wrapTranscript(ctx.lastMessages.join("\n")),
       `Nhiệm vụ: ${lastIsCustomer ? "soạn câu trả lời cho (các) tin nhắn mới nhất của khách" : "tin cuối là của shop — soạn tin chăm sóc / nhắc lại phù hợp, không lặp lại ý shop vừa gửi"}.
 - Tra cứu bằng tool khi cần giá / mẫu / chính sách (không đoán).
@@ -57,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     const { out, model } = await runClaude({
       db, settings, feature: "suggest", memberId: user.id, conversationId,
-      system: salesSystem(core, settings.shop_notes), prompt, schema: Out, effort: "low", maxIterations: 3,
+      system: salesSystem(core, settings.shop_notes, lessons.rules), prompt, schema: Out, effort: "low", maxIterations: 3,
       tools: lookupTools(db, seen),
     });
 
@@ -65,7 +71,7 @@ export async function POST(req: NextRequest) {
       style: s.style, text: s.text.trim(),
       images: s.attach_codes.map((c) => seen.product(c)).filter((p) => p?.image_url).slice(0, 4).map((p) => ({ url: p!.image_url!, code: p!.code, price: p!.price_text })),
     })).filter((s) => s.text);
-    return NextResponse.json({ ok: true, mode, model, need: out.need, missing: out.missing, notes: out.notes, suggestions, sources: sourcesFrom(seen, out.sources) });
+    return NextResponse.json({ ok: true, mode, model, need: out.need, missing: out.missing, notes: out.notes, suggestions, sources: sourcesFrom(seen, out.sources), lessons_used: lessons.used.length });
   } catch (e) {
     return aiErrorResponse(e);
   }
