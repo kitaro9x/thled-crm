@@ -11,6 +11,9 @@ export async function PUT(req: NextRequest) {
   const { data: me } = await db.from("crm_members").select("role,is_active").eq("id", user.id).maybeSingle();
   if (me?.role !== "admin" || !me.is_active) return NextResponse.json({ error: "Chỉ admin" }, { status: 403 });
   const value = mergeAi(await req.json());
+  // phần "AI trực thay" lưu qua /api/ai/away — ở đây giữ nguyên bản đang có trong DB (form này không gửi kèm, tránh ghi đè)
+  const { data: cur } = await db.from("crm_settings").select("value").eq("key", "ai").maybeSingle();
+  value.away = mergeAi(cur?.value).away;
   value.shop_notes = value.shop_notes.slice(0, 4000);
   value.brain_pinned = value.brain_pinned.filter((p) => p.startsWith("01-noi-bo-chung/")).slice(0, 10);
   const { error } = await db.from("crm_settings").upsert({ key: "ai", value, updated_at: new Date().toISOString() });

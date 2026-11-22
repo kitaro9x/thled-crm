@@ -61,12 +61,14 @@ export async function POST(req: NextRequest) {
         const atts = (m.message.attachments || []).map((a: any) => ({ type: a.type === "image" ? "image" : a.type === "video" ? "video" : a.type === "audio" ? "audio" : "file", url: a.payload?.url, name: a.payload?.title }));
         // echo từ app khác app CRM (Business Suite / tác nhân AI của Meta / trả lời tự động) → đánh dấu để CRM hiện "AI Meta đang trả lời"
         const echoApp = isEcho ? String(m.message.app_id || "") : "";
-        const metaAi = (isEcho && echoApp && echoApp !== String(process.env.FB_APP_ID || "")) || (isEcho && m._standby);
+        // tin dội của chính AI trực thay trong CRM (gửi kèm metadata "ai_away") → không phải Meta AI, không tính là người trả lời
+        const aiAway = isEcho && String(m.message.metadata || "").startsWith("ai_away");
+        const metaAi = !aiAway && ((isEcho && echoApp && echoApp !== String(process.env.FB_APP_ID || "")) || (isEcho && m._standby));
         const res = await ingestMessage(db, {
           channelType: "fb_page", channelExternalId: pageId, senderExternalId: senderId,
           senderName: profile?.name, senderAvatar: profile?.profile_pic, messageSenderName: metaAi ? "Business Suite" : undefined,
           text: m.message.text, type: atts.length ? atts[0].type : m.message.sticker_id ? "sticker" : "text", attachments: atts,
-          externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: { ...m, meta_ai: metaAi || undefined, standby: m._standby || undefined },
+          externalMsgId: m.message.mid, sentAt: new Date(m.timestamp).toISOString(), direction: isEcho ? "out" : "in", raw: { ...m, meta_ai: metaAi || undefined, standby: m._standby || undefined, ai_away: aiAway || undefined },
           referral: referral ? { source: referral.source, type: referral.type, ad_id: referral.ad_id, ref: referral.ref, ads_context: referral.ads_context_data } : undefined,
         });
         if ((metaAi || m._standby) && res?.conversationId) {

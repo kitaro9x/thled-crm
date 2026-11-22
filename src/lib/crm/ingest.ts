@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { cancelAwayReply, queueAwayReply } from "@/lib/crm/away-server";
 import { extractPhone, normalizePhone } from "@/lib/phone";
 import type { Attachment, ChannelType, LeadSource } from "@/lib/types";
 import { runAutomation } from "./automation";
@@ -58,12 +59,15 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
 
   // 3. message (idempotent theo external_msg_id)
   const direction = m.direction || "in";
+  const sentAt = m.sentAt || new Date().toISOString(); // một mốc duy nhất cho cả dòng tin lẫn hàng chờ AI trực thay
   const { data: msg, error } = await db.from("crm_messages").insert({
     conversation_id: conv.id, direction, type: m.type || "text", text: m.text ?? null, attachments: m.attachments || [], sender_name: m.messageSenderName ?? null,
-    external_msg_id: m.externalMsgId ?? null, sent_at: m.sentAt || new Date().toISOString(), raw: m.raw ?? null, status: "sent",
+    external_msg_id: m.externalMsgId ?? null, sent_at: sentAt, raw: m.raw ?? null, status: "sent",
   }).select("id").single();
   if (error && !/duplicate/i.test(error.message)) throw error;
   if (!msg) return { conversationId: conv.id, duplicate: true };
+  // có người (không phải AI trực thay) vừa gửi tin đi — anh nhắn từ điện thoại, Business Suite… → huỷ lượt AI đang chờ trả lời
+  if (direction === "out" && !(m.raw as any)?.ai_away) await cancelAwayReply(db, conv.id);
 
   // nguồn quảng cáo (click-to-Messenger)
   if (m.referral?.ad_id || m.referral?.source === "ADS") {
@@ -108,6 +112,13 @@ export async function ingestMessage(db: SupabaseClient, m: InboundMessage) {
   // 4. Nguồn khách hàng → person + lead
   const phone = normalizePhone(m.senderPhone) || extractPhone(m.text) || identity.phone;
   const personId = await applyLeadSources(db, { channelId: channel.id, conversation: conv, identity, phone, email: null, isNewConversation: isNew });
+
+  // AI trực thay khi chủ shop nghỉ: xếp hàng trả lời (tự bỏ qua nếu đang tắt / hội thoại không đủ điều kiện; lỗi không chặn luồng nhận tin)
+  await queueAwayReply(db, {
+    conversationId: conv.id, channelType: channel.type, kind, hidden: !!conv.is_hidden, labels: allLabels,
+    customerId: personId || conv.customer_id || identity.customer_id || null, identityPhone: identity.phone || null,
+    type: m.type || "text", text: m.text ?? null, sentAt, standby: !!(m.raw as any)?.standby,
+  });
 
   // 5. Phân phối hội thoại (chỉ khi chưa có người phụ trách)
   if (!conv.assigned_to) {
