@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as z from "zod/v4";
 import { aiGuard, aiErrorResponse, loadBrainCore, loadConversation, lookupTools, runClaude, salesSystem, searchProducts, Seen, sourcesFrom, wrapTranscript, type CustomerMode } from "@/lib/crm/ai";
+import { lessonContext } from "@/lib/crm/lessons-server";
 
 export const maxDuration = 60;
 
@@ -34,19 +35,20 @@ export async function POST(req: NextRequest) {
       const hits = (await Promise.all(prevCodes.map((c) => searchProducts(db, { q: c, limit: 3 }).catch(() => [])))).flat();
       seen.addProducts(hits.filter((p) => prevCodes.some((c) => c.toLowerCase() === p.code.toLowerCase())));
     }
-    const core = await loadBrainCore(db, settings.brain_pinned, seen);
+    const [core, lessons] = await Promise.all([loadBrainCore(db, settings.brain_pinned, seen), lessonContext(db, question)]);
     const prompt = [
       `Nhân viên THLED hỏi bạn (đây là câu hỏi nội bộ, KHÔNG phải tin gửi khách — được nêu mã NCC nếu kho tri thức có).`,
       `Đối tượng khách đang tư vấn: ${mode === "thau" ? "nhà thầu" : "khách lẻ"}.`,
       ctx ? `Ngữ cảnh hội thoại đang mở (tham khảo):\n${wrapTranscript(ctx.lastMessages.join("\n"))}` : "",
       history.length ? `Đây là câu hỏi TIẾP THEO trong cuộc hỏi đáp ở trên — hiểu theo ngữ cảnh các câu trước (vd "loại đó", "mẫu thứ 2", "còn màu khác không"). Mã sản phẩm đã gợi ý trước đó: ${prevCodes.join(", ") || "không có"} (dùng lại được trong "products" mà không cần tra lại).` : "",
+      lessons.similar ? `Tình huống tương tự shop đã xử lý (bài học đã duyệt):\n${lessons.similar}` : "",
       `Câu hỏi: ${question}`,
       `Giá / mẫu / ảnh: tra bằng search_products (gọi song song nếu cần nhiều nhóm). Chính sách đã có trong kho tri thức nạp sẵn thì trả lời luôn; chưa có mới gọi search_brain. Gợi ý mẫu thì liệt kê mã trong "products" (server tự lấy giá + ảnh thật). answer ngắn gọn, tối đa ~8 dòng.`,
     ].filter(Boolean).join("\n\n");
 
     const { out, model } = await runClaude({
       db, settings, feature: "ask", memberId: user.id, conversationId,
-      system: salesSystem(core, settings.shop_notes), prompt, schema: Out, effort: "low", maxIterations: 3,
+      system: salesSystem(core, settings.shop_notes, lessons.rules), prompt, schema: Out, effort: "low", maxIterations: 3,
       tools: lookupTools(db, seen), history: history.map((h: { q: string; a: string }) => ({ q: h.q, a: h.a })),
     });
     const products = out.products.map((p) => ({ hit: seen.product(p.code), note: p.note })).filter((x) => x.hit).slice(0, 6)
