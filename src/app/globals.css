@@ -22,47 +22,97 @@ body { background: var(--bg); color: var(--fg); font-family: ui-sans-serif, syst
 /* chip nhãn theo nhóm màu */
 .lchip { @apply inline-flex items-center rounded-md px-1.5 py-px text-[11px] font-medium; }
 .lchip-gray { background:#e2e8f0; color:#334155; } .lchip-green { background:#d1fae5; color:#047857; } .lchip-blue { background:#dbeafe; color:#1d4ed8; } .lchip-amber { background:#fef3c7; color:#b45309; } .lchip-red { background:#fee2e2; color:#b91c1c; } .lchip-violet { background:#ede9fe; color:#6d28d9; }
-html.dark .lchip-gray { background:#334155; color:#e2e8f0; } html.dark .lchip-green { background:#064e3b; color:#6ee7b7; } html.dark .lchip-blue { background:#1e3a8a; color:#bfdbfe; } html.dark .lchip-amber { background:#78350f; color:#fde68a; } html.dark .lchip-red { background:#7f1d1d; color:#fecaca; } html.dark .lchip-violet { background:#4c1d95; color:#ddd6fe; }
+/* chip theo màu tuỳ chỉnh (giai đoạn cơ hội, nhãn hội thoại): style={{"--c": màu}} → nền nhạt + chữ đậm cùng tông, không còn khối màu đặc chói / chữ trắng trên nền vàng khó đọc */
+.cchip { background: color-mix(in srgb, var(--c, #64748b) 15%, #fff); color: color-mix(in srgb, var(--c, #64748b) 58%, #000); }
+/* chip lọc giai đoạn: viền theo màu giai đoạn (nhạt), chọn → nền nhạt + chữ đậm */
+.schip { border-color: color-mix(in srgb, var(--c, #64748b) 50%, transparent) !important; }
+.schip.on { background-color: color-mix(in srgb, var(--c, #64748b) 16%, #fff) !important; color: color-mix(in srgb, var(--c, #64748b) 58%, #000) !important; border-color: var(--c, #64748b) !important; font-weight: 600; box-shadow: none; }
 
-/* ===== Giao diện tối: ghi đè các lớp màu sáng đang dùng khắp app ===== */
-html.dark { color-scheme: dark; --bg:#0b1220; --fg:#e2e8f0; }
-html.dark .bg-white, html.dark .card, html.dark .btn, html.dark .input { background-color:#111a2e !important; color:#e2e8f0; }
-html.dark .btn:hover { background-color:#1a2540 !important; }
-html.dark .btn-primary { background-color:#2563eb !important; border-color:#2563eb !important; color:#fff; }
-html.dark .btn-primary:hover { background-color:#1d4ed8 !important; }
-html.dark .btn-danger { background-color:#dc2626 !important; border-color:#dc2626 !important; }
-html.dark .bg-slate-50, html.dark .bg-slate-100, html.dark .hover\:bg-slate-50:hover { background-color:#162036 !important; }
-html.dark .bg-slate-200 { background-color:#1e293b !important; }
-html.dark .bg-\[\#eef1f6\] { background-color:#0f172a !important; }
-html.dark .bg-blue-50 { background-color:#1e3a8a55 !important; }
-html.dark .bg-emerald-50 { background-color:#064e3b66 !important; }
-html.dark .bg-amber-50 { background-color:#78350f55 !important; }
-html.dark .bg-red-50 { background-color:#7f1d1d55 !important; }
-html.dark .bg-green-50 { background-color:#14532d66 !important; }
-html.dark .border-slate-50, html.dark .border-slate-100, html.dark .border-slate-200 { border-color:#1e293b !important; }
-html.dark .text-slate-800, html.dark .text-slate-700, html.dark .text-slate-600 { color:#cbd5e1 !important; }
-html.dark .text-slate-500, html.dark .text-slate-400 { color:#a8b3c7 !important; } /* ≥4.5:1 trên #0b1220 */
-html.dark .tbtn { background-color:#111a2e !important; color:#e2e8f0; border-color:#1e293b; } html.dark .tbtn:hover { background-color:#1a2540 !important; border-color:#334155; } html.dark .tbtn.active { background-color:#1e3a8a66 !important; border-color:#3b82f6; color:#bfdbfe; }
-html.dark .fchip { background-color:#111a2e !important; color:#cbd5e1; border-color:#1e293b; } html.dark .fchip.on { background-color:#2563eb !important; color:#fff; border-color:#2563eb; }
-html.dark .conv-row:hover { background-color:#162036 !important; } html.dark .conv-row.sel { background-color:#1e3a8a44 !important; }
-html.dark .text-blue-700 { color:#93c5fd !important; }
-html.dark .text-emerald-700 { color:#6ee7b7 !important; }
-html.dark .text-amber-700 { color:#fcd34d !important; }
-html.dark .text-red-600 { color:#fca5a5 !important; }
-html.dark .text-amber-900 { color:#fde68a !important; }
-html.dark .bg-amber-50.border-amber-200 { border-color:#92400e !important; }
-html.dark input, html.dark select, html.dark textarea { background-color:#111a2e; color:#e2e8f0; }
-html.dark input::placeholder, html.dark textarea::placeholder { color:#64748b; }
-html.dark .rounded-2xl.bg-white { background-color:#243247 !important; border:1px solid #334155; } /* bong bóng tin khách tách nền rõ hơn */
+/* ===== Giao diện tối: tông xám-xanh dịu, viền/kẻ mờ, chữ không trắng gắt, màu nhấn bớt rực =====
+   Mọi màu tối lấy từ biến dưới đây — muốn chỉnh độ sáng/tối chỉ cần sửa 1 chỗ. */
+html.dark {
+  color-scheme: dark; accent-color: #4a74cc;
+  --bg:#0e141d; --fg:#d3dae4;
+  --d-surface:#141b26;  /* cột, thẻ, nút, ô nhập */
+  --d-raised:#1a2230;   /* hover, nền phụ */
+  --d-sunken:#10161f;   /* nền khung chat */
+  --d-border:#263040;   /* viền nút / ô nhập / thẻ */
+  --d-line:#212a37;     /* kẻ phân cách giữa các hội thoại — mờ, chỉ đủ tách dòng */
+  --d-text-2:#b4becc;   /* chữ phụ */
+  --d-muted:#8c98aa;    /* chữ mờ (tương phản ≥ 4.5:1 trên nền) */
+  --d-primary:#3762c2; --d-primary-h:#2f56ab; /* xanh chính bớt rực hơn #2563eb */
+  --d-bubble:#1d2635;   /* bong bóng tin khách */
+}
+/* Tailwind v4: "border" không ghi màu = màu chữ → ra viền trắng gắt ở giao diện tối (và viền đen ở giao diện sáng). Đưa về màu viền chuẩn. */
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button { border-color: var(--color-slate-200, currentColor); }
+  html.dark *, html.dark ::after, html.dark ::before, html.dark ::backdrop, html.dark ::file-selector-button { border-color: var(--d-border); }
+}
+html.dark .bg-white, html.dark .card, html.dark .btn, html.dark .input { background-color:var(--d-surface) !important; color:var(--fg); }
+html.dark .btn, html.dark .input, html.dark .card { border-color:var(--d-border); }
+html.dark .btn:hover { background-color:var(--d-raised) !important; border-color:#323d4f; }
+html.dark .input:focus { border-color:#4a72c9; }
+html.dark .btn-primary, html.dark .bg-blue-600 { background-color:var(--d-primary) !important; border-color:var(--d-primary) !important; color:#f1f5fb; }
+html.dark .btn-primary:hover, html.dark .hover\:bg-blue-700:hover { background-color:var(--d-primary-h) !important; }
+html.dark .border-blue-600 { border-color:var(--d-primary) !important; }
+html.dark .btn-danger { background-color:#c2383a !important; border-color:#c2383a !important; }
+html.dark .bg-green-600, html.dark .bg-emerald-600 { background-color:#1f7546 !important; } /* bong bóng Zalo gửi đi */
+html.dark .border-green-600, html.dark .border-emerald-600 { border-color:#1f7546 !important; }
+html.dark .bg-red-600 { background-color:#b33a3a !important; }
+/* nền phụ */
+html.dark .bg-slate-50, html.dark .bg-slate-100, html.dark .hover\:bg-slate-50:hover, html.dark .hover\:bg-slate-100:hover { background-color:var(--d-raised) !important; }
+html.dark .bg-slate-200, html.dark .hover\:bg-slate-200:hover { background-color:#232d3c !important; }
+html.dark .bg-\[\#eef1f6\] { background-color:var(--d-sunken) !important; }
+html.dark .bg-blue-50, html.dark .hover\:bg-blue-50:hover { background-color:rgba(59,110,210,.14) !important; }
+html.dark .bg-emerald-50, html.dark .bg-green-50 { background-color:rgba(16,185,129,.10) !important; }
+html.dark .bg-amber-50 { background-color:rgba(245,158,11,.10) !important; }
+html.dark .bg-red-50, html.dark .hover\:bg-red-50:hover { background-color:rgba(239,68,68,.10) !important; }
+html.dark .bg-violet-50 { background-color:rgba(139,92,246,.10) !important; }
+html.dark .bg-emerald-100 { background-color:rgba(16,185,129,.18) !important; } html.dark .bg-amber-100 { background-color:rgba(245,158,11,.18) !important; }
+html.dark .bg-red-100 { background-color:rgba(239,68,68,.18) !important; } html.dark .bg-violet-100 { background-color:rgba(139,92,246,.18) !important; }
+/* viền: màu pastel của giao diện sáng → viền mờ cùng tông */
+html.dark .border-slate-50, html.dark .border-slate-100, html.dark .border-slate-200 { border-color:var(--d-border) !important; }
+html.dark .border-slate-300 { border-color:#344052 !important; }
+html.dark .border-blue-100, html.dark .border-blue-200, html.dark .border-blue-300 { border-color:rgba(96,140,220,.38) !important; }
+html.dark .border-emerald-100, html.dark .border-emerald-200 { border-color:rgba(16,185,129,.28) !important; }
+html.dark .border-amber-100, html.dark .border-amber-200 { border-color:rgba(245,158,11,.28) !important; }
+html.dark .border-red-200, html.dark .border-red-300 { border-color:rgba(239,68,68,.30) !important; }
+html.dark .border-violet-100, html.dark .border-violet-200 { border-color:rgba(139,92,246,.30) !important; }
+/* chữ */
+html.dark .text-slate-800, html.dark .text-slate-700, html.dark .text-slate-600 { color:var(--d-text-2) !important; }
+html.dark .text-slate-500, html.dark .text-slate-400 { color:var(--d-muted) !important; }
+html.dark .text-blue-600 { color:#7fa5e9 !important; }
+html.dark .text-blue-700 { color:#93b4ee !important; }
+html.dark .text-emerald-700, html.dark .text-emerald-800 { color:#72cfa6 !important; }
+html.dark .text-amber-700, html.dark .text-amber-800 { color:#e3bf6c !important; }
+html.dark .text-amber-900 { color:#ead08f !important; }
+html.dark .text-red-600, html.dark .text-red-700 { color:#ef9d9d !important; }
+html.dark .text-violet-600, html.dark .text-violet-700, html.dark .text-violet-800 { color:#b9a6f2 !important; }
+html.dark .bg-amber-50.border-amber-200 { border-color:rgba(245,158,11,.30) !important; }
+html.dark input, html.dark select, html.dark textarea { background-color:var(--d-surface); color:var(--fg); }
+html.dark input::placeholder, html.dark textarea::placeholder { color:#66738a; }
+/* nút thanh công cụ, chip lọc */
+html.dark .tbtn { background-color:var(--d-surface) !important; color:var(--fg); border-color:var(--d-border); } html.dark .tbtn:hover { background-color:var(--d-raised) !important; border-color:#323d4f; } html.dark .tbtn.active { background-color:rgba(59,110,210,.18) !important; border-color:rgba(96,140,220,.5); color:#b5cdf5; }
+html.dark .fchip { background-color:var(--d-surface) !important; color:var(--d-text-2); border-color:var(--d-border); } html.dark .fchip:hover { background-color:var(--d-raised) !important; } html.dark .fchip.on { background-color:var(--d-primary) !important; color:#f1f5fb; border-color:var(--d-primary); }
+/* danh sách hội thoại: kẻ phân cách mờ (trước đây trắng gắt), dòng chọn tô nhẹ */
+html.dark .conv-row { border-bottom-color:var(--d-line); }
+html.dark .conv-row:hover { background-color:var(--d-raised) !important; } html.dark .conv-row.sel { background-color:rgba(59,110,210,.13) !important; } html.dark .conv-row.sel::before { background:#4a74cc; }
+/* bong bóng tin khách tách nền vừa đủ, viền mờ */
+html.dark .rounded-2xl.bg-white { background-color:var(--d-bubble) !important; border:1px solid #263142; }
+/* chip nhãn: nền trong mờ + chữ pastel thay vì khối màu đậm */
+html.dark .lchip-gray { background:rgba(148,163,184,.14); color:#bcc6d3; } html.dark .lchip-green { background:rgba(16,185,129,.14); color:#7cd3ad; } html.dark .lchip-blue { background:rgba(59,130,246,.16); color:#a3c1f0; } html.dark .lchip-amber { background:rgba(245,158,11,.14); color:#e9c674; } html.dark .lchip-red { background:rgba(239,68,68,.14); color:#f0a5a5; } html.dark .lchip-violet { background:rgba(139,92,246,.16); color:#c3b2f3; }
+html.dark .cchip { background: color-mix(in srgb, var(--c, #64748b) 20%, var(--d-surface)); color: color-mix(in srgb, var(--c, #64748b) 45%, #e6ebf2); }
+html.dark .schip { border-color: color-mix(in srgb, var(--c, #64748b) 40%, transparent) !important; }
+html.dark .schip.on { background-color: color-mix(in srgb, var(--c, #64748b) 26%, var(--d-surface)) !important; color: color-mix(in srgb, var(--c, #64748b) 45%, #e6ebf2) !important; border-color: color-mix(in srgb, var(--c, #64748b) 70%, transparent) !important; }
 
 /* nhãn NHÓM: dịu mắt ở cả sáng/tối */
 .group-badge { @apply inline-flex items-center gap-0.5 align-middle rounded px-1 py-px text-[10px] font-medium; background: rgba(16,185,129,.12); color: #047857; }
-html.dark .group-badge { background: rgba(16,185,129,.18); color: #6ee7b7; }
-html.dark .ring-emerald-400 { --tw-ring-color: rgba(52,211,153,.55); }
+html.dark .group-badge { background: rgba(16,185,129,.16); color: #72cfa6; }
+html.dark .ring-emerald-400 { --tw-ring-color: rgba(52,211,153,.45); }
 
 /* in đơn hàng: chỉ in tờ báo giá */
 @media print { aside, nav, .print\:hidden { display: none !important; } main { overflow: visible !important; } html.dark body, html.dark .card { background: #fff !important; color: #000 !important; } body { background: #fff !important; } }
-html.dark .dark-send-off { background-color:#1e293b !important; color:#64748b !important; }
+html.dark .dark-send-off { background-color:var(--d-raised) !important; color:#66738a !important; }
 
 /* ===== Điện thoại (iOS) ===== */
 @media (max-width: 767px) {

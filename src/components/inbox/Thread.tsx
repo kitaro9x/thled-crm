@@ -17,6 +17,7 @@ import { Lightbox } from "./Lightbox";
 import { AiSuggestPanel, type AiImage } from "./AiSuggest";
 import { SafeImg } from "./SafeImg";
 import { AI_EVENT_ATTACH, AI_EVENT_INSERT, imageName } from "@/lib/ai-config";
+import { compressImage } from "@/lib/image";
 
 export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen, onOpenGallery, aiSuggest }: { conv: Conversation; siblings?: Conversation[]; labels: Label[]; members: { id: string; name: string }[]; knowledge: { id: string; title: string; shortcut?: string | null; content: string }[]; galleryOpen?: boolean; onOpenGallery?: () => void; /** admin bật AI + nhân viên không tự ẩn */ aiSuggest?: boolean }) {
   const sb = supabaseBrowser();
@@ -168,19 +169,6 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
     if (ok.length < Array.from(list).length) setErr("Chỉ nhận ảnh jpg/png/webp/gif, video mp4/mov, PDF — tối đa 25 MB");
     setFiles((fs) => [...fs, ...ok.map((file) => ({ file, preview: file.type.startsWith("image/") ? URL.createObjectURL(file) : "" }))]);
   };
-  /** Nén ảnh trên trình duyệt: tối đa 1600px cạnh dài, JPEG 0.85 (GIF giữ nguyên) */
-  const compressImage = (file: File): Promise<File> => new Promise((resolve) => {
-    if (!file.type.startsWith("image/") || file.type === "image/gif" || file.size < 300 * 1024) return resolve(file);
-    const img = new Image(); const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const max = 1600; const sc = Math.min(1, max / Math.max(img.width, img.height));
-      const c = document.createElement("canvas"); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
-      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob((b) => { URL.revokeObjectURL(url); resolve(b && b.size < file.size ? new File([b], file.name.replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" }) : file); }, "image/jpeg", 0.85);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-    img.src = url;
-  });
   const uploadAll = async () => {
     const out: { type: string; url: string; name: string }[] = [];
     for (const { file: raw } of files) {
@@ -376,7 +364,7 @@ export function Thread({ conv, siblings, labels, members, knowledge, galleryOpen
           {showAssign && <div className="absolute right-0 top-10 z-10 card p-2 w-56 shadow-lg">{members.map((m) => <button key={m.id} onClick={() => assign(m.id)} className="block w-full text-left py-1.5 px-2 rounded hover:bg-slate-50 text-sm">{m.name}</button>)}</div>}
         </div>
       </div>
-      {(convLabels.length > 0 || tasks.length > 0) && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap items-center relative">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip text-white" style={{ background: lb?.color || "#64748b" }}>{l}</span>; })}
+      {(convLabels.length > 0 || tasks.length > 0) && <div className="px-4 py-1.5 bg-white border-b border-slate-100 flex gap-1 flex-wrap items-center relative">{convLabels.map((l) => { const lb = labels.find((x) => x.name === l); return <span key={l} className="chip cchip" style={{ "--c": lb?.color || "#64748b" } as React.CSSProperties}>{l}</span>; })}
         {tasks.length > 0 && <div ref={tasksRef} className="ml-auto">
           <button onClick={() => setShowTasks((v) => !v)} title="Công việc đang mở của khách này (mục Công việc)" className={cn("lchip cursor-pointer gap-1", lateTasks ? "lchip-red" : "lchip-amber")}><ClipboardList size={12} />{lateTasks ? `${lateTasks}/${tasks.length} việc quá hạn` : `${tasks.length} việc đang mở`}</button>
           {showTasks && <div className="absolute right-3 top-full mt-1 z-20 card shadow-lg w-80 max-w-[calc(100vw-24px)] p-2 max-h-96 overflow-y-auto text-sm">

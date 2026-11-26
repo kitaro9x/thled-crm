@@ -4,8 +4,30 @@ import fs from "fs";
 const FONT = path.join(process.cwd(), "fonts", "Sans.ttf"), FONT_B = path.join(process.cwd(), "fonts", "Sans-Bold.ttf");
 const vnd = (n: number) => (Number(n) || 0).toLocaleString("vi-VN") + " đ";
 const d2 = (iso: string) => { const d = new Date(iso); return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`; };
-/** Dựng PDF báo giá / đơn hàng (A4) → Buffer */
+/**
+ * Tải ảnh sản phẩm cho PDF. pdfkit chỉ đọc JPEG/PNG → thu nhỏ + chuyển JPEG bằng sharp (đi kèm Next.js);
+ * không có sharp thì dùng thẳng ảnh JPEG/PNG; ảnh lỗi / quá 6 giây / định dạng khác → bỏ qua (dòng đó không có ảnh).
+ */
+async function loadImage(url: string): Promise<Buffer | null> {
+  try {
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 6000);
+    const r = await fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
+    if (!r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer()); if (!buf.length || buf.length > 15 * 1024 * 1024) return null;
+    try {
+      const sharp = (await import("sharp")).default;
+      return await sharp(buf).rotate().resize(240, 240, { fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 82 }).toBuffer();
+    } catch { /* không có sharp / ảnh lạ */ }
+    const jpg = buf[0] === 0xff && buf[1] === 0xd8, png = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    return jpg || png ? buf : null;
+  } catch { return null; }
+}
+
+/** Dựng PDF báo giá / đơn hàng (A4) → Buffer. Dòng hàng có ảnh (items[].image) → thêm cột Ảnh. */
 export async function buildOrderPdf(o: any, company: any): Promise<Buffer> {
+  const items: any[] = o.items || [];
+  const imgs = await Promise.all(items.map((it) => (it?.image ? loadImage(String(it.image)) : Promise.resolve(null))));
+  const hasImg = imgs.some(Boolean);
   // dọn khoảng trống tránh pdfkit đọc font chuẩn AFM (không có trong bundle serverless)
   const doc = new PDFDocument({ size: "A4", margin: 48, font: fs.existsSync(FONT) ? FONT : undefined, info: { Title: `${o.code || "Don hang"} - ${company?.name || "THLED"}` } });
   const chunks: Buffer[] = []; doc.on("data", (c) => chunks.push(c));
@@ -27,16 +49,25 @@ export async function buildOrderPdf(o: any, company: any): Promise<Buffer> {
   if (o.note) { B().text("Ghi chú: ", L + W * 0.6, doc.y, { continued: true }); R().text(o.note, { width: W * 0.4 }); }
   y = Math.max(doc.y, 190) + 10;
   // table
-  const cols = [28, W - 28 - 90 - 40 - 100, 90, 40, 100]; const heads = ["#", "Sản phẩm", "Đơn giá", "SL", "Thành tiền"]; const aligns: ("left" | "right")[] = ["left", "left", "right", "right", "right"];
-  const row = (vals: string[], bold = false, bg?: string) => {
-    const h = Math.max(...vals.map((v, i) => (bold ? B() : R()).fontSize(9.5).heightOfString(v, { width: cols[i] - 8 }))) + 10;
+  // cột Ảnh (54pt) chỉ có khi ít nhất 1 dòng có ảnh tải được
+  const IMG = 54;
+  const cols = hasImg ? [24, IMG, W - 24 - IMG - 88 - 36 - 96, 88, 36, 96] : [28, W - 28 - 90 - 40 - 100, 90, 40, 100];
+  const heads = hasImg ? ["#", "Ảnh", "Sản phẩm", "Đơn giá", "SL", "Thành tiền"] : ["#", "Sản phẩm", "Đơn giá", "SL", "Thành tiền"];
+  const aligns: ("left" | "right")[] = hasImg ? ["left", "left", "left", "right", "right", "right"] : ["left", "left", "right", "right", "right"];
+  const row = (vals: string[], bold = false, bg?: string, img?: Buffer | null) => {
+    const th = Math.max(...vals.map((v, i) => (bold ? B() : R()).fontSize(9.5).heightOfString(v, { width: cols[i] - 8 }))) + 10;
+    const h = !bold && hasImg ? Math.max(th, IMG) : th;
     if (y + h > doc.page.height - 120) { doc.addPage(); y = 48; }
     if (bg) doc.rect(L, y, W, h).fill(bg);
-    let x = L; vals.forEach((v, i) => { (bold ? B() : R()).fontSize(9.5).fillColor("#0f172a").text(v, x + 4, y + 5, { width: cols[i] - 8, align: aligns[i] }); x += cols[i]; });
+    let x = L; vals.forEach((v, i) => { (bold ? B() : R()).fontSize(9.5).fillColor("#0f172a").text(v, x + 4, y + (h - th) / 2 + 5, { width: cols[i] - 8, align: aligns[i] }); x += cols[i]; });
+    if (img) { try { doc.image(img, L + cols[0] + 4, y + 4, { fit: [IMG - 8, h - 8], align: "center", valign: "center" }); } catch { /* ảnh hỏng → bỏ */ } }
     doc.moveTo(L, y + h).lineTo(L + W, y + h).lineWidth(0.5).strokeColor("#e2e8f0").stroke(); y += h;
   };
   row(heads, true, "#f1f5f9");
-  (o.items || []).forEach((it: any, i: number) => row([String(i + 1), it.name || "", vnd(it.unit_price), String(it.qty), vnd(it.amount)]));
+  items.forEach((it: any, i: number) => {
+    const v = [String(i + 1), it.name || "", vnd(it.unit_price), String(it.qty), vnd(it.amount)];
+    row(hasImg ? [v[0], "", ...v.slice(1)] : v, false, undefined, imgs[i]);
+  });
   // totals
   y += 10; const tx = L + W - 240;
   const tot = (k: string, v: string, bold = false) => { (bold ? B() : R()).fontSize(bold ? 11 : 10).fillColor(bold ? "#0f172a" : "#475569").text(k, tx, y, { width: 120 }); (bold ? B() : R()).fillColor("#0f172a").text(v, tx + 120, y, { width: 120, align: "right" }); y += bold ? 20 : 16; };

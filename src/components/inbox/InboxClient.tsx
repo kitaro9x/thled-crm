@@ -187,8 +187,8 @@ export function InboxClient({ initial, labels, members, channels, knowledge, ai 
           {ai?.enabled && <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none" title="Ẩn/hiện nút Gợi ý AI, Trợ lý AI và Tóm tắt AI cho riêng bạn (lưu trên trình duyệt này). Admin bật/tắt cho cả shop ở Cài đặt → Trợ lý AI."><input type="checkbox" checked={!aiHidden} onChange={toggleAiHidden} /> <Sparkles size={12} className="text-violet-500" /> Trợ lý AI cho tôi</label>}
           <div className="flex gap-1.5 flex-wrap">{quick.map((x) => <button key={x.k} onClick={() => setQf(x.k)} className={cn("fchip", qf === x.k && "on")}>{x.l}</button>)}<button onClick={toggleCustOnly} title="Chỉ hiện khách hàng: hội thoại chưa gắn nhãn hoặc nhãn khách. Ẩn Nhà cung cấp, Gia đình, Bạn bè, Công nợ, Thầu, Shipper… (nhãn có tick 'Không tạo cơ hội' trong Cài đặt → Nhãn). Kết hợp được với các chip khác." className={cn("fchip", custOnly && "on", custOnly && "ring-1 ring-emerald-400")}>{custOnly ? "✓ " : ""}Khách hàng</button></div>
           {stages.length > 0 && <div className="flex gap-1.5 flex-wrap" title="Lọc theo giai đoạn cơ hội của khách — bấm lần nữa để bỏ lọc">
-            {stages.map((st) => <button key={st.id} onClick={() => setStageF((v) => (v === st.id ? null : st.id))} className={cn("fchip", stageF === st.id && "on")} style={stageF === st.id ? { background: st.color, borderColor: st.color, color: "#fff" } : { borderColor: st.color }}>{stageLabel(st.name)} <span className="opacity-70 tabular-nums">{stageCount[st.id] ?? 0}</span></button>)}
-            <button onClick={() => setStageF((v) => (v === "bought" ? null : "bought"))} className={cn("fchip", stageF === "bought" && "on")} style={stageF === "bought" ? { background: "#16a34a", borderColor: "#16a34a", color: "#fff" } : { borderColor: "#16a34a" }}>✓ Đã mua hàng <span className="opacity-70 tabular-nums">{stageCount.bought ?? 0}</span></button>
+            {stages.map((st) => <button key={st.id} onClick={() => setStageF((v) => (v === st.id ? null : st.id))} className={cn("fchip schip", stageF === st.id && "on")} style={{ "--c": st.color } as React.CSSProperties}>{stageLabel(st.name)} <span className="opacity-70 tabular-nums">{stageCount[st.id] ?? 0}</span></button>)}
+            <button onClick={() => setStageF((v) => (v === "bought" ? null : "bought"))} className={cn("fchip schip", stageF === "bought" && "on")} style={{ "--c": "#16a34a" } as React.CSSProperties}>✓ Đã mua hàng <span className="opacity-70 tabular-nums">{stageCount.bought ?? 0}</span></button>
           </div>}
           {showFilter && (
             <div className="grid grid-cols-2 gap-1 text-xs">
@@ -244,7 +244,7 @@ function LeadChips({ t }: { t: LeadTag }) {
   const bought = t.won || t.orders > 0;
   return (<>
     {bought && <span className="lchip lchip-green" title={t.orders > 0 ? `Đã có ${t.orders} đơn hàng` : "Đã có cơ hội WON"}>✓ Đã mua hàng</span>}
-    {t.open && <span className="lchip" style={{ background: t.open.color, color: "#fff" }} title="Cơ hội đang mở">{t.open.name}</span>}
+    {t.open && <span className="lchip cchip" style={{ "--c": t.open.color } as React.CSSProperties} title="Cơ hội đang mở">{t.open.name}</span>}
     {!bought && !t.open && t.lost && <span className="lchip lchip-red" title="Cơ hội đã thất bại">LOST</span>}
   </>);
 }

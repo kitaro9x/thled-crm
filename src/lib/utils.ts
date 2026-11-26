@@ -13,3 +13,19 @@ export function convName(c: { meta?: any; person_name?: string | null; display_n
   if (!c) return "";
   return c.meta?.alias || c.person_name || c.display_name || c.external_id || "";
 }
+
+/** Trạng thái đơn hàng: giá trị lưu DB → nhãn tiếng Việt */
+export const ORDER_STATUS: Record<string, string> = { new: "Mới", confirmed: "Đã xác nhận", delivering: "Đang giao", done: "Hoàn thành", cancelled: "Huỷ" };
+
+/** Ảnh sản phẩm: đường dẫn tương đối của web thled.vn ("/thietbidien/sp/…") → URL tuyệt đối */
+export function absImage(v: unknown): string | null {
+  let u: any = v;
+  if (typeof u === "string" && /^\s*[[{]/.test(u)) { try { u = JSON.parse(u); } catch { /* giữ nguyên chuỗi */ } }
+  if (Array.isArray(u)) u = u[0];
+  if (u && typeof u === "object") u = u.src || u.url || null;
+  if (typeof u !== "string" || !u.trim()) return null;
+  u = u.trim();
+  if (/^https?:\/\//i.test(u)) return u;
+  if (u.startsWith("//")) return "https:" + u;
+  return "https://www.thled.vn" + (u.startsWith("/") ? u : "/" + u);
+}
